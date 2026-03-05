@@ -192,6 +192,76 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // ========== 外部 LLM API 代理 ==========
+    // 将 /api/external-llm 请求代理到用户指定的外部 API 地址
+    // 前端通过 X-External-API-URL 和 X-External-API-Key 头指定目标
+    if (req.method === 'POST' && req.url === '/api/external-llm') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            try {
+                const externalUrl = req.headers['x-external-api-url'];
+                const externalKey = req.headers['x-external-api-key'] || '';
+
+                if (!externalUrl) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: '缺少 X-External-API-URL 头' }));
+                    return;
+                }
+
+                const parsedUrl = new URL(externalUrl);
+                const isHttps = parsedUrl.protocol === 'https:';
+                const httpModule = isHttps ? require('https') : http;
+
+                const proxyHeaders = {
+                    'Content-Type': 'application/json',
+                    'Host': parsedUrl.host,
+                    'Content-Length': Buffer.byteLength(body),
+                };
+                if (externalKey) {
+                    proxyHeaders['Authorization'] = `Bearer ${externalKey}`;
+                }
+
+                const proxyOptions = {
+                    hostname: parsedUrl.hostname,
+                    port: parsedUrl.port || (isHttps ? 443 : 80),
+                    path: parsedUrl.pathname + parsedUrl.search,
+                    method: 'POST',
+                    headers: proxyHeaders,
+                };
+
+                const proxyReq = httpModule.request(proxyOptions, (proxyRes) => {
+                    // 转发响应头（去掉可能冲突的头）
+                    const resHeaders = { ...proxyRes.headers };
+                    delete resHeaders['access-control-allow-origin'];
+                    res.writeHead(proxyRes.statusCode, resHeaders);
+                    proxyRes.pipe(res, { end: true });
+                });
+
+                proxyReq.on('error', (err) => {
+                    console.error('❌ 外部API代理错误:', err.message);
+                    res.writeHead(502, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: `外部API连接失败: ${err.message}` }));
+                });
+
+                // 设置超时
+                proxyReq.setTimeout(120000, () => {
+                    proxyReq.destroy();
+                    res.writeHead(504, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: '外部API请求超时(120秒)' }));
+                });
+
+                proxyReq.write(body);
+                proxyReq.end();
+            } catch (err) {
+                console.error('❌ 外部API代理异常:', err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            }
+        });
+        return;
+    }
+
     // ========== Ollama API 代理 ==========
     // 将 /ollama/* 请求代理到本地 Ollama 服务（11434端口）
     if (req.url.startsWith('/ollama/')) {
@@ -244,7 +314,15 @@ const server = http.createServer((req, res) => {
         const ext = path.extname(filePath).toLowerCase();
         const mime = MIME_TYPES[ext] || 'application/octet-stream';
 
-        res.writeHead(200, { 'Content-Type': mime });
+        // JS/CSS/JSON 文件禁止缓存，确保代码更新后浏览器立即生效
+        const headers = { 'Content-Type': mime };
+        if (['.js', '.css', '.json', '.html'].includes(ext)) {
+            headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+            headers['Pragma'] = 'no-cache';
+            headers['Expires'] = '0';
+        }
+
+        res.writeHead(200, headers);
         fs.createReadStream(filePath).pipe(res);
     });
 });
@@ -261,6 +339,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`  GET  /api/list-debug-logs   - 列出所有debug log文件`);
     console.log(`  POST /api/save-aimode-log   - 保存AI模式log（覆盖）`);
     console.log(`  POST /api/append-aimode-log - 追加AI模式log（增量）`);
+    console.log(`  POST /api/external-llm      - 外部LLM API代理转发`);
     console.log(`\n💡 切换端口: PORT=8081 node server.js`);
     console.log(`按 Ctrl+C 停止服务器\n`);
 });

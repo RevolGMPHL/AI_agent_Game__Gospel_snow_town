@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🥶 福音雪镇 - 末日生存</title>
     <link rel="icon" href="data:,">
+    <!-- Google Fonts: 像素风 + 终端风 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,29 +19,66 @@
 <h1>🥶 福音雪镇 — 末日生存</h1>
             <p class="subtitle">8 位 AI 居民在极寒中挣扎求生</p>
 
-            <!-- 模型选择 -->
-            <div class="model-select-section">
+            <!-- LLM 来源选择 -->
+            <div class="llm-source-section">
+                <div class="llm-source-label">🔌 LLM 来源</div>
+                <div class="llm-source-tabs">
+                    <button class="llm-source-tab active" id="tab-local" data-source="local">
+                        🖥️ 本地 Ollama
+                    </button>
+                    <button class="llm-source-tab" id="tab-external" data-source="external">
+                        ☁️ 外部 API
+                    </button>
+                </div>
+
+                <!-- 本地 Ollama 模式内容 -->
+                <div class="llm-source-content" id="source-local">
+                    <div class="llm-source-hint">需先运行 <code>ollama serve</code>，免费本地推理</div>
+                </div>
+
+                <!-- 外部 API 模式内容 -->
+                <div class="llm-source-content" id="source-external" style="display:none;">
+                    <div class="llm-source-hint">支持 OpenAI、DeepSeek、GLM-4 等兼容 OpenAI 格式的 API</div>
+                    <div class="external-api-form">
+                        <div class="api-field">
+                            <label class="api-field-label">API 地址</label>
+                            <input type="text" id="external-api-url" class="api-field-input" 
+                                   placeholder="https://api.openai.com/v1/chat/completions" 
+                                   value="">
+                        </div>
+                        <div class="api-field">
+                            <label class="api-field-label">API Key</label>
+                            <input type="password" id="external-api-key" class="api-field-input" 
+                                   placeholder="sk-xxxxxxxx">
+                            <button class="api-key-toggle" id="btn-toggle-key" title="显示/隐藏">👁️</button>
+                        </div>
+                        <div class="api-field">
+                            <label class="api-field-label">模型名称</label>
+                            <input type="text" id="external-model-name" class="api-field-input" 
+                                   placeholder="gpt-4o-mini / deepseek-chat / glm-4-flash">
+                        </div>
+                        <button class="api-test-btn" id="btn-test-api">🔍 测试连接</button>
+                        <div class="api-test-result" id="api-test-result"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 模型选择（仅本地 Ollama 时显示） -->
+            <div class="model-select-section" id="local-model-section">
                 <div class="model-select-label">🧠 选择 AI 模型</div>
                 <div class="model-options" id="model-options">
-                    <label class="model-option" data-model="qwen3:4b-instruct-2507-q8_0">
-                        <input type="radio" name="ai-model" value="qwen3:4b-instruct-2507-q8_0">
+                    <label class="model-option selected" data-model="qwen3.5:4b">
+                        <input type="radio" name="ai-model" value="qwen3.5:4b" checked>
                         <div class="model-option-content">
-                            <div class="model-option-name">Qwen3-4B Q8</div>
-                            <div class="model-option-meta">4.3GB · 速度快 · 质量一般</div>
+                            <div class="model-option-name">Qwen3.5-4B</div>
+                            <div class="model-option-meta">约4.7GB · 速度快 · 性价比高</div>
                         </div>
                     </label>
-                    <label class="model-option selected" data-model="qwen3:14b-q8_0">
-                        <input type="radio" name="ai-model" value="qwen3:14b-q8_0" checked>
+                    <label class="model-option" data-model="qwen3.5:9b">
+                        <input type="radio" name="ai-model" value="qwen3.5:9b">
                         <div class="model-option-content">
-                            <div class="model-option-name">Qwen3-14B Q8</div>
-                            <div class="model-option-meta">15GB · 推荐 · 质量好</div>
-                        </div>
-                    </label>
-                    <label class="model-option" data-model="qwen3:14b-fp16">
-                        <input type="radio" name="ai-model" value="qwen3:14b-fp16">
-                        <div class="model-option-content">
-                            <div class="model-option-name">Qwen3-14B FP16</div>
-                            <div class="model-option-meta">29GB · 最高质量 · 可能需CPU辅助</div>
+                            <div class="model-option-name">Qwen3.5-9B</div>
+                            <div class="model-option-meta">约9GB · 质量更好 · 速度中等</div>
                         </div>
                     </label>
                 </div>
@@ -287,18 +328,92 @@
 
     <div id="save-toast"></div>
 
-    <script src="maps.js"></script>
-    <script src="weather-system.js"></script>
-    <script src="resource-system.js"></script>
-    <script src="furnace-system.js"></script>
-    <script src="death-system.js"></script>
-    <script src="reincarnation-system.js"></script>
-    <script src="difficulty-config.js"></script>
-    <script src="task-system.js"></script>
-    <script src="event-system.js"></script>
-    <script src="npc.js"></script>
-    <script src="dialogue.js"></script>
-    <script src="aimode-logger.js"></script>
-    <script src="game.js"></script>
+    <!-- ====== GST 命名空间初始化 ====== -->
+    <script>window.GST = {};</script>
+
+    <!-- ====== Layer 0: 常量 + 工具 ====== -->
+    <script src="src/core/constants.js?v=40"></script>
+    <script src="src/utils/helpers.js?v=40"></script>
+    <script src="src/utils/sprite-loader.js?v=40"></script>
+    <script src="src/utils/pathfinding.js?v=40"></script>
+
+    <!-- ====== Layer 1: 数据层 ====== -->
+    <script src="data/npc-configs.js?v=40"></script>
+    <script src="data/npc-schedules.js?v=40"></script>
+    <script src="data/npc-prompts.js?v=40"></script>
+    <script src="data/action-effects.js?v=40"></script>
+    <script src="data/map-data.js?v=40"></script>
+    <script src="data/task-definitions.js?v=40"></script>
+    <script src="data/event-definitions.js?v=40"></script>
+
+    <!-- ====== Layer 2: 地图系统 ====== -->
+    <script src="src/map/base-map.js?v=40"></script>
+    <script src="src/map/village-map.js?v=40"></script>
+    <script src="src/map/indoor/indoor-map.js?v=40"></script>
+    <script src="src/map/indoor/dorm-a.js?v=40"></script>
+    <script src="src/map/indoor/dorm-b.js?v=40"></script>
+    <script src="src/map/indoor/warehouse.js?v=40"></script>
+    <script src="src/map/indoor/medical.js?v=40"></script>
+    <script src="src/map/indoor/kitchen.js?v=40"></script>
+    <script src="src/map/indoor/workshop.js?v=40"></script>
+    <script src="src/map/indoor/command.js?v=40"></script>
+    <script src="src/map/map-registry.js?v=40"></script>
+
+    <!-- ====== Layer 3: NPC 核心 + mixin ====== -->
+    <script src="src/npc/npc.js?v=40"></script>
+    <script src="src/npc/npc-ai.js?v=40"></script>
+    <script src="src/npc/npc-attributes.js?v=40"></script>
+    <script src="src/npc/npc-renderer.js?v=40"></script>
+    <script src="src/npc/npc-schedule.js?v=40"></script>
+    <script src="src/npc/action-effects.js?v=40"></script>
+    <script src="src/npc/specialty.js?v=40"></script>
+
+    <!-- ====== Layer 4: 游戏子系统 ====== -->
+    <script src="src/systems/difficulty-config.js?v=40"></script>
+    <script src="src/systems/weather-system.js?v=40"></script>
+    <script src="src/systems/resource-system.js?v=40"></script>
+    <script src="src/systems/furnace-system.js?v=40"></script>
+    <script src="src/systems/death-system.js?v=40"></script>
+    <script src="src/systems/reincarnation-system.js?v=40"></script>
+    <script src="src/systems/task-system.js?v=40"></script>
+    <script src="src/systems/event-system.js?v=40"></script>
+
+    <!-- ====== Layer 5: 对话 + AI ====== -->
+    <script src="src/dialogue/dialogue-manager.js?v=40"></script>
+    <script src="src/dialogue/dialogue-ui.js?v=40"></script>
+    <script src="src/ai/llm-client.js?v=40"></script>
+    <script src="src/ai/llm-status.js?v=40"></script>
+    <script src="src/ai/aimode-logger.js?v=40"></script>
+
+    <!-- ====== Layer 6: 核心引擎 + UI + 启动 ====== -->
+    <script src="src/core/camera.js?v=40"></script>
+    <script src="src/core/game.js?v=40"></script>
+    <script src="src/core/renderer.js?v=40"></script>
+    <script src="src/core/input.js?v=40"></script>
+    <script src="src/ui/hud.js?v=40"></script>
+    <script src="src/core/startup.js?v=40"></script>
+
+    <!-- ====== 向后兼容别名（渐进迁移用，后续可移除） ====== -->
+    <script>
+        // 全局别名 - 让旧代码中的裸引用仍然有效
+        var Camera = GST.Camera;
+        var NPC = GST.NPC;
+        var Game = GST.Game;
+        var callLLM = GST.callLLM;
+        var parseLLMJSON = GST.parseLLMJSON;
+        var TILE = GST.TILE;
+        var C = GST.C;
+        var findPath = GST.findPath;
+        var VillageMap = GST.VillageMap;
+        var BaseMap = GST.BaseMap;
+        var IndoorMap = GST.IndoorMap;
+        var LLM_STATUS = GST.LLM_STATUS;
+        var CHAT_ENABLED = GST.CHAT_ENABLED;
+        var NPC_CONFIGS = GST.NPC_CONFIGS;
+        var ACTION_EFFECT_MAP = GST.ACTION_EFFECT_MAP;
+        var SCHEDULE_LOCATIONS = GST.SCHEDULE_LOCATIONS;
+        var INDOOR_SEATS = GST.INDOOR_SEATS;
+        var BEHAVIOR_PRIORITY = GST.BEHAVIOR_PRIORITY;
+    </script>
 </body>
 </html>

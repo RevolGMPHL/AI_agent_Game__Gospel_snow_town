@@ -1,19 +1,19 @@
-# 🥶 福音雪镇 — 末日生存 启动说明
+# 🥶 福音雪镇 — 末日生存 v4.0 启动说明
 
 ## 网页地址
 
 http://localhost:8080
-python3 restart.py 
+
 ---
 
 ## 🚀 一键重启（推荐）
 
 ```bash
-cd /data/project/project_revol/vibegame/20260220-gospel_snow_town
-python3 restart.py
+cd /data/project/project_revol/vibegame/20260305-gospel-snow-town
+python3 tools/restart.py
 ```
 
-> 指定端口：`python3 restart.py 8081`
+> 指定端口：`python3 tools/restart.py 8081`
 
 脚本会自动执行：检测进程 → 检测端口 → kill进程 → 释放端口 → 启动服务 → 健康检查
 
@@ -22,41 +22,50 @@ python3 restart.py
 ## 🛑 仅关闭服务
 
 ```bash
-cd /data/project/project_revol/vibegame/20260220-gospel_snow_town
+cd /data/project/project_revol/vibegame/20260305-gospel-snow-town
 if [ -f .server.pid ]; then kill $(cat .server.pid) 2>/dev/null && rm -f .server.pid && echo "✅ 已关闭"; fi
 ```
 
 ---
 
-## 🔍 查看状态
+## 📁 项目文件结构（v4.0 重构版）
 
-```bash
-ps aux | grep "node server.js" | grep -v grep   # 进程
-cat .server.pid 2>/dev/null                       # PID
-ss -tlnp | grep -E ":(8080|8081) "               # 端口
-tail -20 log/server.log                           # 日志
+```
+20260305-gospel-snow-town/
+├── index.html                      # 入口页面
+├── style.css                       # 冰霜深色主题样式
+├── server.js                       # Node.js 静态服务器
+│
+├── src/                            # 源码目录（按功能分层）
+│   ├── core/                       # 核心引擎（game / renderer / input / camera / constants / startup）
+│   ├── map/                        # 地图系统（base-map / village-map / indoor/* / map-registry）
+│   ├── npc/                        # NPC 系统 mixin（npc / ai / attributes / renderer / schedule / effects / specialty）
+│   ├── systems/                    # 游戏子系统（resource / furnace / weather / task / death / event / reincarnation / difficulty）
+│   ├── dialogue/                   # 对话系统（dialogue-manager / dialogue-ui）
+│   ├── ai/                         # AI/LLM（llm-client / llm-status / aimode-logger）
+│   ├── ui/                         # UI 模块（hud）
+│   └── utils/                      # 工具函数（pathfinding / sprite-loader / helpers）
+│
+├── data/                           # 纯数据配置（NPC配置 / 日程 / 行动效果 / 地图数据等）
+├── asset/                          # 素材目录（仅最终版，tiles / decorations / buildings / indoor / character / map）
+├── tools/                          # 工具脚本（Python / HTML / Shell）
+├── testcode/                       # 模块测试脚本（node testcode/check-syntax.js）
+└── guide/                          # 项目文档
 ```
 
----
+### 模块加载顺序
 
-## 📁 项目文件说明
+Layer 0: GST 命名空间 → constants → helpers → sprite-loader → pathfinding
+Layer 1: data/* 纯配置
+Layer 2: map 系统
+Layer 3: NPC 核心 + mixin
+Layer 4: 游戏子系统
+Layer 5: 对话 + AI
+Layer 6: 核心引擎 + UI + 启动
 
-| 文件 | 说明 |
-|------|------|
-| `restart.py` | **Python重启脚本（检测+kill+重启+健康检查）** |
-| `index.html` | 主页面（含生存状态栏 + 资源面板 + 难度选择器） |
-| `game.js` | 主游戏逻辑，集成所有子系统 |
-| `npc.js` | NPC系统（含体温/失温/死亡属性 + AI决策prompt + 决策拦截器） |
-| `maps.js` | 地图系统（冬季末日配色） |
-| `dialogue.js` | 对话系统（含关系上下文注入） |
-| `weather-system.js` | 4天温度周期 + 雪花粒子 |
-| `resource-system.js` | 木柴/食物/电力/建材/急救包资源管理 |
-| `furnace-system.js` | 暖炉系统 + 室内温度 |
-| `task-system.js` | NPC专长 + workPlan驱动任务分配 |
-| `death-system.js` | 死亡判定 + 4种结局 + workPlan转移 |
-| `event-system.js` | 冲突事件 + 调解/鼓舞机制 |
-| `reincarnation-system.js` | 轮回记忆 + 前世教训分析 + 智能分工方案生成 |
-| `difficulty-config.js` | 6个难度等级参数表（简单→地狱） |
-| `aimode-logger.js` | AI模式运行日志记录（服务端持久化） |
-| `style.css` | 冰霜深色主题样式 |
-| `server.js` | Node.js 静态服务器 + Debug/AImode日志API |
+### 设计原则
+
+- **GST 命名空间**：所有模块通过 `window.GST` 统一管理
+- **Mixin 模式**：NPC 系统通过原型链 mixin 实现职责分离
+- **数据与逻辑分离**：`data/` 目录可独立修改
+- **双击即用**：直接打开 `index.html` 即可运行

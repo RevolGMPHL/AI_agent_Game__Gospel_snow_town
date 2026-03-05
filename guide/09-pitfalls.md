@@ -775,6 +775,189 @@ if (this.san >= 100) {
 
 ---
 
+## 🔥 坑28：底图加载后画面变脏 — 预烘焙底图与代码渲染不一致
+
+### 问题现象
+游戏启动第一瞬间画面干净整洁（纯色 fallback 渲染），约1秒后底图 PNG 加载完成，画面反而变脏——雪地上出现大量黑色小方块（3-5px）、tile 级别的棋盘格色差、围墙区域深棕色整格方块。问题持续了5轮排查才最终解决。
+
+### 问题根因
+
+**底图 PNG 和 JS 代码使用了不同版本的地面颜色逻辑：**
+
+项目中存在两套地面颜色计算代码：
+1. `maps.js` 中的 `getTileColor()` — JS 版本（已修复，使用噪声插值）
+2. `generate-map-base.py` 中的 `get_tile_color()` — Python 版本（旧版，包含棋盘格逻辑）
+
+底图 PNG 是用 Python 脚本生成的**静态文件**，修改 JS 代码时**没有同步更新 Python 脚本并重新生成底图**。
+
+Python 旧版的三个致命缺陷：
+| 缺陷代码 | 产生的视觉问题 |
+|----------|---------------|
+| `(x + y) % 5 == 0 → GRASS_DARK` | 安全区内对角线深色条纹 |
+| `(x + y) % 3 == 0` 和 `(x + y) % 7 == 0` | 外围雪原密集棋盘格 |
+| 围墙格 `return C.FENCE`（深棕色） | 围墙位置整格 32px 暗色方块 |
+
+排查过程中还遇到了两个加重问题的因素：
+- **浏览器缓存**：没有 `Cache-Control` 头 + 没有 JS 版本号参数 = 代码更新后浏览器仍加载旧文件
+- **canvas 残留**：`drawGrid` 底图分支直接 `drawImage` 不先清除视口，之前帧的渲染残留透出
+
+### 解决方案
+
+1. **同步 Python 和 JS 的颜色逻辑**：修改 `generate-map-base.py` 的 `get_tile_color()`，移除棋盘格，改用 `lerp_color` 噪声插值，重新生成底图
+2. **底图渲染前清除视口**：`drawImage` 前先 `fillRect` 纯色覆盖
+3. **浏览器缓存**：server.js 加 `Cache-Control: no-cache, no-store`，index.html JS 引用加版本号
+
+### ⚠️ 开发注意
+- **预烘焙资源（PNG/JSON等静态文件）与代码逻辑必须保持同步**。修改了 JS 中的渲染逻辑后，如果有对应的 Python 生成器用于生成静态资源，**必须同步更新生成器并重新生成**
+- **两套代码做同一件事是灾难的根源**。`maps.js` 的 `getTileColor` 和 `generate-map-base.py` 的 `get_tile_color` 各有一份，修改了一个忘了另一个。**理想情况下同一个逻辑只有一个权威来源**
+- **本地开发必须设置 `Cache-Control: no-cache`**。否则修改代码后浏览器不会重新加载，你以为代码没生效但其实是缓存问题——这个坑浪费了大量排查时间
+- **底图渲染前必须先清除视口**。canvas 不会自动清除上一帧内容
+- **像素级验证是排查渲染 bug 的终极手段**。用 Python/PIL 扫描 PNG 的像素分布、统计暗色区域、比较相邻 tile 色差，比肉眼观察准确得多
+
+---
+
+## 🔥 坑29：NPC 进屋堵在门口 — 室内寻路失败导致卡死
+
+### 问题现象
+NPC 进入宿舍/厨房后，全部堆在门口（y=7）位置，在门口吃饭、睡觉，不走到房间内部。
+
+### 问题根因
+所有10处进门代码都采用"**先传送到 `indoor_door` 门口 (y=7) → 再 `_pathTo` 寻路走到座位**"的两步模式。但室内空间太小（8格高），y=7 是南墙整行（仅门口2格可走），NPC 横向无法移动。家具碰撞把可走区域切分成多个独立区域，从门口到座位的寻路经常失败。寻路失败后 NPC 就卡在门口，`distToInside <= 3` 的宽松判定还会把门口误判为"已到达"。
+
+### 解决方案
+创建统一的 `_enterIndoor(targetScene, game)` 方法，**直接传送到座位位置**，完全跳过门口→寻路→座位的两步流程。全部10处进门代码统一替换。
+
+### ⚠️ 开发注意
+- **室内空间太小时（≤8格高），不要用"先传送到门口再寻路"的模式**——寻路在狭小空间极易失败
+- **进门入口必须统一为一个方法**（`_enterIndoor`），避免10处代码各自实现导致修复一处漏九处
+- **新增任何进门路径时，必须使用 `_enterIndoor`**，不能自行实现传送+寻路逻辑
+- **室内地图设计参考**：y=0 北墙，y=h-1 南墙（仅门口2格可走），家具不要把通道完全堵死
+
+---
+
+## 🔥 坑30：NPC 室内位置循环重置 — `_teleportTo` 随机偏移 + `_pickIndoorSeat` 反复选座位
+
+### 问题现象
+NPC 进入室内后不断"走到一个位置就被重置位置"，反复循环，很长时间无法走出房间。
+
+### 问题根因
+v2.8 修复堵门口后引入的新循环 bug，3 个因素叠加：
+
+1. **`_teleportTo` 默认模式有 ±1.5 格随机偏移**：`_enterIndoor` 调用 `_teleportTo` 传送到座位 (6,5)，实际传送到 (6.8, 4.2)
+2. **`_navigateToScheduleTarget` 中 `_enterWalkTarget = null` 时每帧重新 `_pickIndoorSeat`**：随机选了一个不同座位 → 计算 `distToInside > 3` → 设新 `_enterWalkTarget` → `_pathTo` 导航
+3. **导航完成后清空 `_enterWalkTarget` → 下一帧又重复选座位**：形成 选座位 → 导航 → 清空 → 选座位 的无限循环
+
+同样的循环逻辑存在于 `_updateSchedule()`、`_navigateToScheduleTarget()`、`_actionOverride` 三处。
+
+### 解决方案
+
+#### 1. `_enterIndoor` 改为精确像素坐标
+```javascript
+// 修复前：_teleportTo 有 ±1.5 格随机偏移
+this._teleportTo(insideLoc.scene, insideLoc.x, insideLoc.y);
+
+// 修复后：直接设置精确像素坐标，零偏移
+this.currentScene = insideLoc.scene;
+this.x = insideLoc.x * TILE;
+this.y = insideLoc.y * TILE;
+```
+
+#### 2. "已在室内"检查简化为直接标记到达
+```javascript
+// 修复前：反复选座位 + distToInside 检查 + 寻路循环
+if (insideScene && this.currentScene === insideScene) {
+    const seatLoc = this._pickIndoorSeat(insideScene, game); // 每帧随机选
+    const distToInside = Math.abs(...); // 可能 > 3
+    this._pathTo(...); // 无限循环导航
+}
+
+// 修复后：已在目标室内 → 直接到达
+if (insideScene && this.currentScene === insideScene) {
+    this.scheduleReached = true;
+    this._enterWalkTarget = null;
+    return;
+}
+```
+
+### ⚠️ 开发注意
+- **`_teleportTo` 的随机偏移（±1.5格）是为了让NPC不堆叠**，但在室内精确传送场景下必须避免——传送到室内座位时应直接设置像素坐标
+- **"NPC 已在目标室内场景"时不要再检查"离座位多远"**——`_enterIndoor` 已经把NPC精确传送到座位了，下一帧不需要再验证位置
+- **`_pickIndoorSeat` 是随机选择，每次调用可能返回不同座位**——绝不能在每帧的 update 循环中调用它，否则 NPC 会不断被分配新目标
+- **修复 A 引入 B 是常见模式**：v2.8 修复了堵门口（不再经门口中转），但引入了循环重置（`_teleportTo` 偏移 + 每帧重新选座位）。**每次修复后必须验证相关联的代码路径是否受影响**
+
+---
+
+## 🔥 坑39：重构迁移脚本到子目录后 PROJECT_DIR 指向错误 — 启动失败
+
+### 问题现象
+v4.0 重构后执行 `python3 tools/restart.py` 启动游戏，报错 `Cannot find module '/data/project/project_revol/vibegame/20260305-gospel-snow-town/tools/server.js'`。`server.js` 明明在项目根目录，但脚本在 `tools/` 下找。
+
+### 问题根因
+重构前，`restart.py` 和 `start-tmux.sh` 都放在项目根目录，使用 `os.path.dirname(__file__)` / `dirname "$0"` 获取项目根目录——完全正确。
+
+重构时将这些工具脚本统一迁移到 `tools/` 子目录，但**没有同步更新 `PROJECT_DIR` 的计算逻辑**。迁移后：
+- `__file__` 解析为 `tools/restart.py` → `dirname` = `tools/` ← ❌ 不是项目根目录
+- `$0` 解析为 `tools/start-tmux.sh` → `dirname` = `tools/` ← ❌
+
+两个脚本都在 `tools/` 目录下找 `server.js`、写 `.server.pid`、创建 `log/` 目录，全部路径错误。
+
+### 解决方案
+两个脚本的 `PROJECT_DIR` 改为上溯一级到父目录：
+```python
+# restart.py
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # tools/ 的父目录
+```
+```bash
+# start-tmux.sh
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"  # tools/ 的父目录
+```
+日志目录调整为 `tools/log/`（通过 `TOOLS_DIR = os.path.join(PROJECT_DIR, "tools")` 中转）。
+
+### ⚠️ 开发注意
+- **移动脚本文件位置后，必须检查脚本中所有基于 `__file__` / `$0` 计算的路径**。这些路径是相对于脚本自身位置的，脚本移动 = 所有路径偏移
+- **重构迁移文件时，不能只 `cp`/`mv` 然后运行测试**——必须 `grep` 搜索文件中所有路径引用（`__file__`、`$0`、`dirname`、硬编码路径等），逐一验证是否需要调整
+- **工具脚本中建议使用"显式项目根目录"而非"相对自身位置推导"**。例如在脚本开头定义 `PROJECT_ROOT = /data/project/.../20260305-gospel-snow-town`，或者通过标记文件（如 `.project-root`）向上搜索确定根目录
+
+---
+
+## 🔥 坑40：v4.0 重构 — 模块化拆分的陷阱和经验
+
+### 背景
+将 26,700 行的单体 JS 项目（14个文件平铺根目录）重构为 49 个模块文件、7层分类的架构。核心挑战是将 8,370 行的 `npc.js` 和 3,794 行的 `game.js` 拆分为多个文件而不破坏功能。
+
+### 踩坑要点
+
+#### 1. 全局变量 → GST 命名空间的兼容层
+原项目所有类和函数都是全局变量（`var Game = ...`、`class NPC { ... }`），重构为 IIFE + GST 命名空间后，**所有跨文件引用都会断裂**。
+
+**解决方案**：在 `index.html` 最后添加"向后兼容别名层"：
+```html
+<script>
+var Camera = GST.Camera;
+var Game = GST.Game;
+var NPC = GST.NPC;
+// ... 等等
+</script>
+```
+这样旧代码中的 `new Game()` 仍然有效，可以渐进式迁移。
+
+#### 2. Mixin 模式的方法挂载顺序
+NPC 核心类在 `npc.js` 中定义，6 个 mixin 文件通过 `GST.NPC.prototype.xxx = function() {...}` 挂载方法。**`npc.js` 必须在所有 mixin 文件之前加载**，否则 `GST.NPC` 为 undefined。
+
+#### 3. 数据文件必须在逻辑文件之前加载
+`data/npc-configs.js` 挂载 `GST.NPC_CONFIGS`，`src/npc/npc.js` 在构造函数中读取 `GST.NPC_CONFIGS[id]`。**data/ 层必须在 src/npc/ 层之前加载**。
+
+#### 4. SpriteLoader 的全局引用
+原项目中 `SpriteLoader` 是全局变量，多个文件直接引用。重构为 `GST.SpriteLoader` 后，需要在兼容层添加 `var SpriteLoader = GST.SpriteLoader`。
+
+### ⚠️ 开发注意
+- **拆分大文件时，先画依赖关系图**：哪些文件引用了哪些全局变量/类/函数，确保加载顺序不破坏依赖链
+- **Mixin 模式要求严格的加载顺序**：核心类定义 → mixin 扩展 → 使用方。index.html 中的 script 标签顺序就是加载顺序
+- **向后兼容别名层是过渡期的生命线**：不要一步到位全部改为 `GST.xxx`，先加别名层保证功能正常，后续逐步迁移
+- **数据与逻辑分离后，data/ 的加载优先级必须高于 src/**：数据文件是"被读取方"，必须先存在
+
+---
+
 ## 📋 通用开发原则（从以上踩坑总结）
 
 ### 1. async 函数 await 后必须重新检查前置条件 🆕
@@ -854,10 +1037,131 @@ JavaScript 构造函数中属性初始化有先后顺序。如果在属性 A 初
 实际运行日志显示，第1天8人全天工作，木柴只采集了1单位（消耗35），食物采集0（消耗64），电力采集1（消耗9）。NPC能正确到达任务目标（伐木场/废墟等），日志中大量 `[WORK] 到达任务目标` 记录，但实际资源产出接近于0。可能原因：(1) `_updateActionEffect()` 的行为关键词匹配没有命中，导致NPC"站在伐木场但没在砍柴"；(2) 产出速率在代码中被某个乘数（体力效率/天气效率/电力加成等）拉低到接近0；(3) NPC频繁切换状态（到达→被P0拉走→再回来），实际持续工作时间极短。**每个采集系统在实际运行后都要验证日志中的采集量是否与设计速率一致（如8/h×8h应=64单位木柴），如果实际远低于预期，必须逐环排查匹配链路。**
 
 ### 25. NPC对已死亡角色做无效行为 — LLM幻觉"安抚死人" 🆕
-实际运行中，王策和清璇在第3天反复出现"陆辰精神濒临崩溃，需立即前往宿舍B进行安抚与陪伴"、"凌玥精神濒临崩溃，需在私密安全环境进行心理疏导"等决策——但陆辰和凌玥在第2天就已经死了。NPC浪费了大量宝贵时间去"安抚"已死的人。原因：`_actionDecision()` prompt中注入的"其他NPC状态"没有明确过滤掉已死亡的NPC，或者死亡NPC的信息仍然残留在prompt中。**prompt中必须明确标注"已死亡"NPC不应被安抚/陪伴/协助，或者直接从可见NPC列表中移除已死亡的NPC。**
+实际运行中，王策和清璇在第3天反复出现"陆辰精神濒临崩溃，需立即前往宿舍B进行安抚与陪伴"、"歆玥精神濒临崩溃，需在私密安全环境进行心理疏导"等决策——但陆辰和歆玥在第2天就已经死了。NPC浪费了大量宝贵时间去"安抚"已死的人。原因：`_actionDecision()` prompt中注入的"其他NPC状态"没有明确过滤掉已死亡的NPC，或者死亡NPC的信息仍然残留在prompt中。**prompt中必须明确标注"已死亡"NPC不应被安抚/陪伴/协助，或者直接从可见NPC列表中移除已死亡的NPC。**
 
 ### 26. San值崩溃速度过快 — 第2天清晨集体精神崩溃致死 🆕
 日志显示：第2天（-30°C）清晨7:25-10:06，不到3小时内6人死亡，其中5人死于"精神崩溃致死"（SAN=0）。这说明San值在-30°C天气下的下降速度过于极端——NPC从San≈60-80降到0只用了几小时。可能问题：(1) 户外低温+死亡事件的San惩罚叠加过于致命（看到同伴死亡San-10，连续死人导致连锁崩溃）；(2) San值恶性循环（San<30额外加速下降）的速率阈值设置不合理，一旦跌破30就再也恢复不了。**需要检查San值的下降速率叠加机制：户外寒冷惩罚 + 看到死亡惩罚 + San<30恶性循环三者叠加时，是否存在"死亡螺旋"（一旦开始崩溃就不可能恢复）。应该设计一个"最低保底"机制或者降低连锁惩罚的速率。**
 
 ### 27. 食物消耗异常高 — 第1天64单位远超设计预期 🆕
 按设计，8人×1.5/餐×2餐=24单位/天的食物消耗。但实际第1天食物消耗了64单位，是设计值的2.6倍。可能原因：(1) 餐次触发过多（NPC饥饿系统在非正餐时间也触发用餐）；(2) 每餐消耗量不是1.5而是更高；(3) 食物浪费机制（无李婶管理时浪费20%）叠加了其他消耗。**资源消耗系统必须在日志中记录每次消耗的触发原因和具体数量，以便验证是否与设计值一致。目前只看到总消耗，无法定位是哪个环节多消耗的。**
+
+### 28. 预烘焙静态资源（PNG/JSON）与代码逻辑必须保持同步 🆕
+项目中存在两套地面颜色计算代码：`maps.js`（JS 运行时）和 `generate-map-base.py`（Python 底图生成器）。修改 JS 版本时忘了同步 Python 版本，导致底图 PNG 是用旧逻辑生成的。底图加载后反而覆盖了干净的 fallback 渲染，画面变脏。**任何时候修改了影响渲染/数据的代码逻辑，都必须检查：是否有对应的静态资源生成器需要同步更新？是否需要重新生成静态资源？** 理想情况下，同一个逻辑只有一个权威来源，避免两套代码做同一件事。（参见坑 28）
+
+### 29. 浏览器缓存是渲染 bug 排查的最大干扰项 🆕
+排查底图渲染 bug 时，浪费了大量时间在"代码已修改但效果没变"上，最终发现是浏览器缓存了旧的 JS 文件和 PNG 文件。**本地开发服务器必须从第一天就设置 `Cache-Control: no-cache, no-store`**，且 HTML 中所有静态资源引用必须带版本号参数（`?v=日期`），每次代码更新后递增版本号。这不是"之后再加"的优化项，而是从项目开始就必须有的基础设施。（参见坑 28）
+
+### 30. 室内进门必须使用统一方法 `_enterIndoor`，禁止自行实现传送+寻路 🆕
+所有NPC进入室内场景的代码路径都必须调用 `_enterIndoor(targetScene, game)`，直接传送到座位。禁止自行实现"传送到门口→寻路到座位"的两步流程——室内空间太小（≤8格高），寻路极易失败导致NPC卡在门口。新增任何进门路径时，先搜索是否已有 `_enterIndoor` 可用。（参见坑 29）
+
+### 31. 每帧 update 循环中禁止调用随机选择函数 🆕
+`_pickIndoorSeat` 等随机选择函数每次调用可能返回不同结果。如果在每帧的 update/日程检查/导航循环中调用，NPC 会每帧被分配不同目标，形成"走向A→下一帧改走B→下一帧改走C"的无限循环。随机选择只应在**一次性事件**中调用（如进门、分配任务），结果要**缓存**到 NPC 状态变量中，后续帧直接使用缓存值。（参见坑 30）### 32. update循环中子系统调用顺序导致的"梦游"竞争条件 🆕
+NPC在深夜睡觉时出现"梦游"现象：睡一半突然走出去干活，然后又瞬移回来继续睡。**根因**：`_updateHunger`在`_updateSleepState`之前调用，当`hunger<10`时饿醒NPC（`isSleeping=false`），紧接着`_updateSleepState`检测到`shouldSleep=true`又立刻让NPC重新入睡，清除了饥饿导航路径。下一帧又被饿醒→又入睡→无限循环。NPC在这个循环中部分帧走出了几步又被拉回来，表现为"梦游"。**修复**：(1) 调换调用顺序为`_updateSleepState`→`_updateHunger`，确保睡眠状态先稳定下来；(2) 入睡条件增加`!this._hungerOverride`检查，饥饿覆盖期间禁止入睡，让NPC先吃完饭再睡觉。**教训：update循环中多个子系统的调用顺序至关重要，系统A修改的状态如果被系统B同帧覆盖，就会产生竞争条件。任何新增的"打断睡眠"逻辑都必须确保不会被`_updateSleepState`同帧撤销。**
+### 33. `_indoorEntryProtection`保护期被双重递减 🆕
+进屋保护期计时器`_indoorEntryProtection`在update循环中被递减了两次（复制粘贴遗留），导致3秒保护期实际只有1.5秒。保护期过早结束可能让日程导航系统在NPC刚进门尚未稳定时就重新触发跨场景导航。**任何计时器递减代码都应该检查是否有重复。**
+
+### 34. 5倍速下冷却计时器被加速导致行为"抖动" 🆕
+游戏 update 传入的 `dt` 是经过倍速放大的 `gameDt = rawDt * speedMultiplier`。所有用 `dt` 递减的冷却计时器（如 `_hungerTriggerCooldown`）在5倍速下实际冷却速度也是5倍——10秒冷却只需2秒真实时间就结束。这导致饥饿触发极其频繁，NPC 每2秒就被打断一次去吃饭。**修复**：冷却计时器用 `_realDt = dt / speedMultiplier` 递减，保证冷却时间不受游戏倍速影响。**原则：行为决策的冷却时间应该基于真实时间，而非游戏时间。只有资源消耗/生产速率才应该跟随游戏倍速。**
+
+### 35. 饥饿系统随机选目标导致NPC在建筑间反复跑 🆕
+`_chooseEatTarget` 每次饥饿触发时加权随机选一个餐饮场所（厨房/仓库/宿舍）。如果NPC已在仓库采集建材，但随机选中了厨房——NPC走出仓库去厨房，吃完再回来继续采集。5倍速下饥饿消耗也×5，很快又触发饥饿，这次随机选了仓库——NPC就地吃。下次又选厨房——又跑出去。**修复**：`_chooseEatTarget` 增加"就近原则"——NPC已在某个室内场景时优先选择该场景吃饭，只有在户外才走加权随机选择。**原则：NPC在室内执行任务时，非紧急需求应就地解决，不要打断任务来回跑。**
+
+### 36. 常规饥饿打断任务覆盖导致决策振荡 🆕
+`hunger<35`（常规饥饿）和 `hunger<25`（强制进食）都会触发 `_triggerHungerBehavior`，暂停或取消当前的 `_taskOverride`。NPC吃完饭后任务恢复 → 刚回到工作位置 → 饥饿又降到阈值 → 又暂停任务去吃饭 → 无限循环。**修复**：`hunger<35` 常规饥饿增加 `!_taskOverride.isActive && !_resourceGatherOverride` 检查，任务/资源采集期间不触发。只有 `hunger<15`（极度饥饿）才能强制打断一切。**分级策略：P0极度饥饿(< 15)打断一切 → P0强制进食(<25)打断日程不打断任务 → 常规饥饿(<35)不打断任务/采集。**
+
+### 37. `_triggerHungerBehavior` 中 `scheduleReached=false` 覆盖导航结果 🆕
+`_triggerHungerBehavior` 先调用 `_navigateToScheduleTarget(target)` 再设 `scheduleReached=false`。但 `_navigateToScheduleTarget` 在检测到 NPC 已在目标室内时会设 `scheduleReached=true`。后面的 `=false` 覆盖了这个结果，导致下一帧又重新导航。**修复**：将 `scheduleReached=false` 移到 `_navigateToScheduleTarget` 调用之前。**原则：导航函数可能同步修改状态，调用后不要再覆盖其设置的状态。**
+
+
+### 34. 5倍速下冷却计时器被加速导致行为"抖动" 🆕
+游戏 update 传入的 dt 是经过倍速放大的 gameDt = rawDt * speedMultiplier。所有用 dt 递减的冷却计时器在5倍速下实际冷却速度也是5倍——10秒冷却只需2秒真实时间就结束。修复：冷却计时器用 realDt = dt / speedMultiplier 递减。原则：行为决策的冷却时间应该基于真实时间，而非游戏时间。
+
+### 35. 饥饿系统随机选目标导致NPC在建筑间反复跑 🆕
+_chooseEatTarget 每次饥饿触发时随机选餐饮场所。修复：NPC已在某个室内场景时优先选择该场景就地吃饭，只有在户外才走加权随机。
+
+### 36. 常规饥饿打断任务覆盖导致决策振荡 🆕
+hunger<35 常规饥饿和任务覆盖互相竞争导致NPC在建筑间反复跑。修复：常规饥饿增加 _taskOverride 和 _resourceGatherOverride 检查，任务/资源采集期间不触发。只有极度饥饿(<15)才能强制打断一切。
+
+### 37. _triggerHungerBehavior 中 scheduleReached=false 覆盖导航结果 🆕
+先调用导航再设 scheduleReached=false 会覆盖导航内部设的 true。修复：将 scheduleReached=false 移到导航调用之前。
+
+---
+
+## 🔥 坑38：5倍速下NPC"出门→闪现回屋→出门"死循环 — 出门保护期+时间缩放隔离
+
+### 问题现象
+5倍速下NPC不断循环：走出仓库门→瞬间被传送回仓库→又走出门→又被传送回来。同时头顶交替显示"肚子饿了"和"采集建材中"两个矛盾状态。1倍速下正常。
+
+### 问题根因
+
+5个计时器直接使用加速后的 `dt` 递减，在5倍速下保护机制形同虚设：
+
+| 计时器 | 用途 | 设定值 | 5倍速下真实持续时间 |
+|--------|------|--------|---------------------|
+| `_indoorEntryProtection` | 进屋保护期 | 5秒 | **1秒** |
+| `_exitDoorTimer` | 出门超时 | 3秒 | **0.6秒** |
+| `_hungerTravelTimer` | 饥饿传送超时 | 15秒 | **3秒** |
+| `_hungerTriggerCooldown` | 饱食冷却 | 10秒 | **2秒** |
+| `_indoorEntryProtection`（递减） | 出门后安全网延迟 | 5秒 | **1秒** |
+
+**死循环链路**：
+1. NPC吃完饭，2秒后又饿了（冷却被加速消耗）
+2. 饥饿系统驱动NPC走出仓库去厨房
+3. NPC传送到village，但0.6秒后出门超时已过
+4. 安全网检测到NPC应在室内→1秒后保护期过→传送回仓库
+5. 回仓库后又饿了→又走出门→循环
+
+同时：
+- `_walkToDoorAndExit` 没有清理 `_pendingEnterScene`→NPC出门后被残留的进门标记拉回
+- 出门的3个传送路径（近距离/走到门口/路径为空兜底）都没有设置出门保护期
+
+### 解决方案
+
+#### 1. 保护期/冷却计时器改用真实时间
+```javascript
+// 计算真实时间增量
+const speedMult = (game && game.speedOptions) ? game.speedOptions[game.speedIdx] : 1;
+const _realDt = speedMult > 0 ? dt / speedMult : dt;
+
+// 用真实时间递减保护期
+this._indoorEntryProtection -= _realDt;  // 非 dt
+```
+
+#### 2. 所有出门路径设置出门保护期
+在 `_walkToDoorAndExit`（近距离直接出门）和 `_updateDoorWalk`（3个传送路径）中，传送到village后立即设置：
+```javascript
+this._indoorEntryProtection = 5;  // 5秒真实时间内安全网不执行
+this._pendingEnterScene = null;    // 清理残留进门标记
+```
+
+#### 3. 极度饥饿无视冷却
+hunger < 15 和 hunger < 10 的P0强制进食不检查 `_hungerTriggerCooldown`，确保极端消耗下NPC能及时吃饭。常规饥饿（hunger < 35）仍受冷却保护。
+
+### ⚠️ 开发注意
+- **每个新增的计时器都必须标注"使用真实时间"还是"使用游戏时间"**，并在代码注释中说明原因
+- **真实时间计算公式**：`_realDt = dt / speedMultiplier`，其中 `speedMultiplier` 从 `game.speedOptions[game.speedIdx]` 获取
+- **所有通过 `_teleportTo` 传送NPC到village的代码路径**，都必须在传送后设置 `_indoorEntryProtection`，否则安全网会在下一帧把NPC传送回去
+- **出门时必须清理 `_pendingEnterScene`**，否则NPC出门后可能被自动进门逻辑拉回
+- **冷却机制的"紧急豁免"设计**：对于保护NPC生存的冷却（如饱食冷却），当属性达到极端值时（如 hunger < 15）应允许豁免冷却——冷却是为了防止频繁打断，不是为了让NPC饿死
+
+### 38. 迁移脚本到子目录后必须更新所有路径引用 🆕
+脚本文件中基于 `__file__`/`$0`/`dirname` 计算的路径是相对于脚本自身位置的。**移动脚本文件位置 = 所有路径偏移**。迁移后必须 `grep` 搜索文件中所有路径引用（`__file__`、`$0`、`dirname`、硬编码路径等），逐一验证是否需要调整。建议在工具脚本中使用"显式项目根目录"或标记文件（如 `.project-root`）向上搜索确定根目录，而非依赖脚本自身位置推导。（参见坑 39）
+
+### 39. 模块化拆分大文件的加载顺序必须画依赖图 🆕
+将大文件（如 8370 行 npc.js）拆分为多个 mixin 模块时，**核心类定义必须在所有 mixin 文件之前加载**（否则 `prototype` 挂载目标不存在）。数据文件（`data/*`）必须在逻辑文件（`src/*`）之前加载（否则构造函数读取配置时报 undefined）。正确做法：先画依赖关系图 → 按层级排序 → 在 index.html 中严格按顺序加载。拆分后务必用自动化脚本验证所有文件存在且关键方法已正确挂载。（参见坑 40）
+
+### 40. 重构时保留向后兼容别名层 🆕
+将全局变量重构为命名空间（如 `var Game` → `GST.Game`）时，**不要一步到位全部改完**。在 index.html 末尾添加向后兼容别名层：`var Camera = GST.Camera; var Game = GST.Game;` 等。这样旧代码中的全局引用仍然有效，可以逐步、安全地迁移到命名空间引用。兼容层是"安全网"，确保重构过程中功能不中断。
+
+### 41. IIFE 内部变量不能被其他 IIFE 裸引用 — 必须通过 GST 命名空间访问 🆕
+v4.0 重构后，各模块使用 IIFE 隔离。IIFE 内部的 `let/const` 变量（如 `llm-client.js` 中的 `LLM_SOURCE`、`API_KEY` 等）对外不可见。其他 IIFE（如 `startup.js`、`hud.js`）如果直接以裸变量名引用，运行时会报 `ReferenceError: xxx is not defined`。**正确做法**：通过 IIFE 暴露的 `GST.LLM` getter/setter 访问（如 `GST.LLM.source`、`GST.LLM.model`）。**检查方法**：运行 `node testcode/check-syntax.js` 自动检测跨 IIFE 变量引用。**新增任何 IIFE 内部变量，如果需要被其他模块使用，必须在 IIFE 末尾通过 GST 命名空间暴露。**（参见坑 40 模块化拆分经验）
+
+### 42. `typeof` 检查 IIFE 内部类名永远为 `undefined` — 导致所有子系统未实例化 🆕🔴
+**这是 v4.0 重构后最严重的 bug**。`game.js` 中用 `typeof WeatherSystem !== 'undefined'` 来检查子系统类是否存在，但 `WeatherSystem` 等类定义在各自 IIFE 内部，只通过 `GST.WeatherSystem` 暴露，全局 `typeof` 永远返回 `'undefined'`。结果：**天气、资源、暖炉、死亡、任务、事件、轮回、AI日志 — 全部8个子系统都没有被实例化**！游戏看起来能跑但没有核心逻辑。**正确做法**：检查 `GST.XXXSystem` 而非裸类名。**错误示例**：`(typeof ReincarnationSystem !== 'undefined') ? new GST.ReincarnationSystem(this) : null`。**正确示例**：`GST.ReincarnationSystem ? new GST.ReincarnationSystem(this) : null`。**检查方法**：运行 `node testcode/check-syntax.js`（检查5自动检测此问题）。**通用原则：IIFE 架构下，永远不要用 typeof 检查只挂载到 GST 的类名，直接用 `GST.XXX` 做真值检查。**
+
+### 43. IIFE 外裸引用静态方法也会崩溃 — 修了 typeof 还有 `.xxx` 调用 🆕🔴
+坑42修复后系统终于能实例化了，但**运行到静态方法调用时又崩溃**。`AIModeLogger.npcAttrSnapshot(npc)` 散布在5个文件14处，全是裸引用。`typeof` 检查是 IIFE 架构的第一层 bug，**裸类名的静态方法/属性直接调用是第二层 bug**。必须同时排查。**修复方案**：`AIModeLogger.npcAttrSnapshot()` → `GST.AIModeLogger.npcAttrSnapshot()`。**检查方法**：运行 `node testcode/check-syntax.js`（检查6自动检测此问题）。**通用原则：重构为 IIFE + GST 命名空间后，所有跨文件的类引用（无论是 new、typeof、还是静态方法）必须全部走 GST.XXX。**
+
+### 44. P0 子优先级死循环 — 体温避险与医疗需求互相打架，NPC 永远到不了医疗站 🆕🔴
+
+NPC 健康危急(HP<30)触发 P0-5 `medical_urgent`，出门瞬间体温降到 <35°C 被 P0-2 `hypothermia` 覆盖送回宿舍，回宿舍后体温恢复又触发 P0-5 出门，形成**无限死循环**。根因是 **P0 层内的多个子优先级之间没有互斥/优先级仲裁**，按代码顺序执行时高编号的 P0-5 总是被低编号的 P0-2 覆盖。**修复方案**：P0-2 增加"赶往室内目标免疫"（医疗站/宿舍也是室内，进去就能恢复体温），仅当体温 <33°C 严重失温时才强制覆盖。⚠️ **开发注意**：同层 P0 子优先级之间不能无条件互相覆盖，必须考虑 NPC 的目标是否也能满足覆盖者的需求（如"去医疗站"也能解决体温问题因为医疗站是室内）。**通用原则：多个 P0 子优先级之间需要仲裁机制，不能简单地按代码顺序覆盖。**

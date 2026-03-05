@@ -4,6 +4,566 @@
 
 ---
 
+## v4.3.1 — P0 优先级死循环修复：NPC 无法到达医疗站 (2026-03-05)
+
+### 🐛 Bug 修复：P0-2(体温) 与 P0-5(医疗) 优先级互相打架
+
+- **问题现象**：NPC 健康危急(HP<30)触发 P0-5 `medical_urgent` 前往医疗站，一出门到 village 就被 P0-2 `hypothermia`(体温<35°C)覆盖送回宿舍，形成死循环
+- **问题根因**：P0 层内的5个子优先级按代码顺序执行，P0-2(体温)在 P0-5(医疗)之前，出门瞬间体温降到<35°C 就会覆盖掉 medical_urgent
+- **修复方案**：
+  1. P0-2 增加例外：当 NPC 正赶往室内目标(`medical_urgent`/`health_critical`)且体温≥33°C时，不覆盖为 hypothermia（医疗站也是室内，进去就能恢复体温）；体温<33°C(严重失温)仍强制覆盖就近避险
+  2. P0-5 增加兜底：NPC 已处于 `medical_urgent` 但不在移动（如刚出门到 village），重新导航到 medical_door
+
+### 📝 代码改动
+
+- `src/npc/npc-schedule.js`：
+  - P0-2 条件增加 `isHeadingIndoor` 和 `needHypothermiaOverride` 判断
+  - P0-5 增加 `else if (!this.isMoving && this.currentPath.length === 0)` 重新导航兜底
+
+---
+
+## v4.3 — 游戏后台运行支持 (2026-03-05)
+
+### ✨ 功能：浏览器标签页隐藏时游戏继续运行
+
+- **问题现象**：浏览器标签页切走或最小化后，`requestAnimationFrame` 被浏览器节流（降到 ~1fps 甚至暂停），NPC AI 决策停滞，Ollama 空闲释放 GPU
+- **根因**：游戏主循环完全依赖 `requestAnimationFrame` 驱动，浏览器出于性能考虑会对后台标签页限制 rAF 频率
+- **方案**：智能双模式切换
+  - **前台**（标签页活跃）→ `requestAnimationFrame` 驱动，~60fps，正常渲染
+  - **后台**（标签页隐藏）→ `setTimeout` 驱动，15fps，只执行 `update()` 不执行 `draw()`
+  - 通过 `document.visibilitychange` 事件自动无缝切换
+- **效果**：NPC 决策、游戏时间流逝、自动存档在后台标签页中正常运行
+
+### 📝 代码改动
+
+- `src/core/game.js`：
+  - 启动处新增 `_bgTimerId`、`_isBgMode`、`_BG_FPS` 属性
+  - 新增 `document.visibilitychange` 事件监听器
+  - `loop(time)` 方法增加后台模式退出守卫
+  - 新增 `_bgLoop()` 方法 — setTimeout 驱动的后台循环（只 update 不 draw）
+
+---
+
+## v4.2.1 — AIModeLogger 裸引用修复 + 检查工具增强 (2026-03-05)
+
+### 🐛 Bug：AIModeLogger.npcAttrSnapshot 裸引用导致运行时崩溃
+
+- **问题现象**：`npc-schedule.js:1180 Uncaught ReferenceError: AIModeLogger is not defined`，游戏卡死
+- **根因**：v4.2 修复了 `typeof` 检查问题使子系统能实例化了，但 `AIModeLogger.npcAttrSnapshot()` 这个**静态方法调用**散布在 5 个文件共 14 处，全都是裸引用（不通过 GST），运行时报错
+- **修复**：`AIModeLogger.npcAttrSnapshot` → `GST.AIModeLogger.npcAttrSnapshot`（5文件14处）
+
+### 🧪 测试工具增强
+
+- 新增**检查6**：裸全局类名直接使用检测（如 `AIModeLogger.xxx`、`DeathSystem.xxx` 等）
+- 检查项从 746 → **1106**，全部通过
+
+### 📝 代码改动
+- src/npc/npc-schedule.js：9 处 `AIModeLogger.` → `GST.AIModeLogger.`
+- src/systems/death-system.js：3 处
+- src/core/game.js：1 处
+- src/npc/npc-attributes.js：1 处
+- src/npc/npc-ai.js：1 处
+
+---
+
+## v4.2 — 五大系统实例化修复 + 轮回系统恢复 (2026-03-05)
+
+### 🐛 Critical Bug：所有子系统未实例化 — `typeof` 检查 IIFE 内部类名
+
+- **问题现象**：轮回模式的轮回没了、不能查看上一世和前几世的结局、完美结局等功能全部失效
+- **根因分析**：v4.0 模块化重构后，所有子系统类（`WeatherSystem`、`ResourceSystem`、`FurnaceSystem`、`DeathSystem`、`TaskSystem`、`EventSystem`、`ReincarnationSystem`、`AIModeLogger`）定义在各自 IIFE 内部，只通过 `GST.XXXSystem` 暴露。但 `game.js` 中用 `typeof WeatherSystem !== 'undefined'` 检查——这些裸类名在 IIFE 外部不可见，`typeof` 永远返回 `'undefined'`，导致**所有 7 个子系统 + AI日志器都没有被实例化**！
+- **修复**：将 game.js 中 15 处 `typeof XXX !== 'undefined'` 全部改为 `GST.XXX ? new GST.XXX(this) : null`
+- **影响范围**：game.js 第83-101行（初始化）+ 第1278-1295行（轮回重建）共 15 处
+
+### 🧪 测试工具增强
+
+- `testcode/check-syntax.js` 新增**检查5**：`typeof` 检查 IIFE 内部类名的自动检测
+- 检查项从 386 项增加到 746 项，全部通过
+
+### 📝 代码改动
+- src/core/game.js：15 处 `typeof XXX !== 'undefined'` → `GST.XXX ?` 检查
+
+---
+
+## v4.1 — IIFE 作用域修复 + 模块语法检查工具 (2026-03-05)
+
+### 🐛 Bug修复：`LLM_SOURCE is not defined` — 跨 IIFE 引用私有变量
+
+- **问题现象**：浏览器控制台报 `Uncaught (in promise) ReferenceError: LLM_SOURCE is not defined`，游戏无法启动
+- **根因分析**：v4.0 模块化重构后，`LLM_SOURCE`、`EXTERNAL_API_URL`、`EXTERNAL_API_KEY`、`EXTERNAL_MODEL`、`API_KEY`、`API_URL`、`USE_OLLAMA_NATIVE`、`AI_MODEL` 等变量定义在 `llm-client.js` 的 IIFE 内部，通过 `GST.LLM` 暴露了 getter/setter。但 `startup.js` 和 `hud.js` 的 IIFE 中直接以裸变量名引用这些变量，跨 IIFE 无法访问
+- **修复**：
+  - `startup.js`：顶部引入 `const LLM = GST.LLM`，全部 9 处裸变量引用改为通过 `LLM.source`、`LLM.model`、`LLM.externalUrl` 等 getter/setter 访问
+  - `hud.js`：第339行 `AI_MODEL` 改为 `GST.LLM ? GST.LLM.model : '未知'`
+
+### 🧪 新增：模块语法 & 作用域检查工具
+
+- **`testcode/check-syntax.js`**：Node.js 命令行检查工具，4 项自动化检查
+  - [检查1] Node.js 语法检查（`node -c`）— 所有 `src/` 和 `data/` 下的 JS 文件
+  - [检查2] Mixin 文件中的裸方法定义检测 — 缺少 `proto.` 前缀的方法
+  - [检查3] IIFE 中的 `static get/set` 检测 — 不能在 IIFE mixin 中使用 class 语法
+  - [检查4] 跨 IIFE 变量引用检测 — 其他 IIFE 中直接引用 `llm-client.js` 等文件的私有变量
+- **运行方式**：`node testcode/check-syntax.js`
+- **推荐工作流**：修改代码 → 跑检查脚本 → 修复报错 → 浏览器刷新验证
+
+### 📖 新增：模块测试方法论文档
+
+- **`guide/10-module-testing.md`**：记录 IIFE 架构下三类常见 bug（语法错误/方法定义错误/作用域泄露）的检测方法和编码规范速查
+
+### 📝 代码改动
+- src/core/startup.js：引入 `const LLM = GST.LLM` + 9 处裸变量引用替换为 `LLM.*`
+- src/ui/hud.js：第339行 `AI_MODEL` → `GST.LLM.model`
+- **新增** testcode/check-syntax.js：模块语法检查工具（4 项检查，386 项验证全通过）
+- **新增** guide/10-module-testing.md：模块测试方法论文档
+
+---
+
+## v4.0 — 全项目模块化重构 (2026-03-05)
+
+### 🏗️ 架构重构概要
+- **原项目**：14个JS文件平铺根目录，总计 26,700 行，npc.js 8,370 行，game.js 3,794 行
+- **新项目**：49个JS文件按 7 层分类组织，总计 24,561 行
+- **目录结构**：`src/`（core/map/npc/systems/dialogue/ai/ui/utils）+ `data/` + `asset/` + `tools/` + `guide/`
+- **设计原则**：SRP / OCP / LSP / ISP / DIP / LoD / LKP 七大原则贯穿
+
+### 🧩 模块化拆分
+
+#### NPC 系统（8,370行 → 7个文件）
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `src/npc/npc.js` | 1,758 | NPC 核心类（构造/update/移动/序列化） |
+| `src/npc/npc-ai.js` | 1,468 | AI行动决策/同伴系统/社交判断 (18个proto mixin) |
+| `src/npc/npc-attributes.js` | 2,323 | 属性更新/饥饿/体温/目标/医疗 (41个proto mixin) |
+| `src/npc/npc-renderer.js` | 591 | Sprite绘制/气泡/状态标签 (3个proto mixin) |
+| `src/npc/npc-schedule.js` | 1,404 | 日程调度/天气调整/睡眠 (14个proto mixin) |
+| `src/npc/action-effects.js` | 419 | ACTION_EFFECT_MAP效果应用 (1个proto mixin) |
+| `src/npc/specialty.js` | 94 | 专长效率计算 (2个proto mixin) |
+
+#### Game 引擎（3,794行 → 6个文件）
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `src/core/game.js` | 1,457 | Game 主类（主循环/子系统调度/场景切换） |
+| `src/core/renderer.js` | 381 | Canvas 渲染引擎（日夜/雨雪/HUD/小地图） |
+| `src/core/input.js` | 164 | 键盘鼠标输入 |
+| `src/core/camera.js` | 59 | 摄像机 |
+| `src/core/startup.js` | 605 | 模型选择/游戏启动 |
+| `src/ai/llm-client.js` | 309 | callLLM/parseLLMJSON/模型配置 |
+
+#### 地图系统（2,416行 → 12个文件）
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `src/map/base-map.js` | 355 | BaseMap 基类 |
+| `src/map/village-map.js` | 1,203 | VillageMap 村庄主地图 |
+| `src/map/indoor/indoor-map.js` | 114 | IndoorMap 基类 |
+| `src/map/indoor/*.js` (7个) | 68-121 | 7个室内地图子类 |
+| `src/map/map-registry.js` | 49 | 地图注册中心 |
+
+### 📦 数据与逻辑分离
+- `data/npc-configs.js` — 8个NPC静态配置提取到独立文件
+- `data/npc-schedules.js` — 日程位置映射 + 室内座位定义
+- `data/action-effects.js` — 行为优先级 + ACTION_EFFECT_MAP
+- `data/map-data.js` — 地图共享常量
+
+### 🔧 GST 命名空间体系
+- 所有模块通过 `window.GST` 命名空间统一管理
+- IIFE 包装避免全局变量污染
+- NPC/Game 系统使用 Mixin 模式（proto 原型链扩展）
+- index.html 按 7 层依赖顺序加载 48 个 script
+- 向后兼容别名层保证渐进迁移
+
+### 🧹 素材清理
+- 移除所有 `*0.png` 旧版素材
+- 移除 `gen/` 生成目录
+- 仅保留 6 张最终版室内底图、9 张建筑精灵图、2 张村庄底图
+- Python/HTML/Shell 工具脚本统一收纳到 `tools/` 目录
+
+### 🐛 启动脚本路径修复
+- **问题**：`tools/restart.py` 和 `tools/start-tmux.sh` 中 `PROJECT_DIR` 通过 `__file__`/`$0` 获取自身所在目录（`tools/`），但 `server.js` 在项目根目录，导致 `Cannot find module .../tools/server.js`
+- **修复**：两个脚本的 `PROJECT_DIR` 改为上溯到父目录（项目根目录）
+  - `restart.py`：`os.path.dirname(os.path.dirname(os.path.abspath(__file__)))`
+  - `start-tmux.sh`：`$(dirname "$0")/..`
+- **日志目录**：保持在 `tools/log/` 下
+
+### 📝 文档更新
+- `start.md` 重写为 v4.0 新项目结构说明
+- `guide/guide.md` 全面重写（v4.0 架构概览 + 新 mermaid 架构图 + 文档索引）
+- `guide/06-tech.md` 完全重写技术架构文档（49个模块清单 + 加载顺序 + Mixin模式说明）
+- `guide/08-changelog.md` 新增 v4.0 完整记录
+- `guide/09-pitfalls.md` 新增重构踩坑记录（坑39）
+
+---
+
+## v3.3 — 住宿安排调整：男女分宿 (2026-03-04)
+
+### 🏠 宿舍男女分开安排
+- **问题**：老钱（♂60）之前被分配到宿舍B与3位女性（李婶、歆玥、清璇）同住，不合理
+- **调整**：老钱搬到宿舍A，实现**纯男/纯女**分宿
+  - **宿舍A（男生，5人）**：赵铁柱、王策、苏岩、陆辰、老钱
+  - **宿舍B（女生，3人）**：李婶、歆玥、清璇（第4张床空置）
+- **床位重排**：宿舍A 5张床紧凑排布（x=1,3,5,7,9），宿舍B 3张床（x=1,4,7）+ 1空床位
+
+### 📝 涉及修改文件
+- `maps.js`：DormAMap（5张床 + 5个beds）、DormBMap（3张床 + 3个beds + 1空床位）、describe()文本
+- `npc.js`：老钱 home→dorm_a、日程 dorm_b→dorm_a、KNOWN_POSITIONS 床位坐标/编号、INDOOR_SEATS 座位配置、歆玥/清璇 bed编号调整
+- `generate_indoor_maps.py`：同步更新宿舍A/B家具和座位定义
+- `guide/02-map.md`、`guide/03-npc.md`：更新文档中的宿舍描述
+
+---
+
+## v3.2 — 室内场景底图PNG替换：AI生成6张室内图 + IndoorMap底图渲染支持 (2026-03-04)
+
+### 🎨 室内场景AI生成底图替换（resize_indoor.py）
+- **6张AI生成室内场景图**：用户在 `asset/indoor/gen/` 目录准备了6张AI生成的室内场景底图
+- **自动缩放脚本**（`resize_indoor.py`）：将AI生成大图缩放为游戏所需尺寸（Lanczos滤镜）+ 4x放大备份版
+  - warehouse（仓库）：→ 320×256 / 1280×1024
+  - medical（医疗站）：→ 320×256 / 1280×1024
+  - dorm_a（宿舍A）：→ 384×256 / 1536×1024
+  - dorm_b（宿舍B）：→ 384×256 / 1536×1024
+  - kitchen（炊事房）：→ 256×256 / 1024×1024
+  - workshop（工坊）：→ 384×256 / 1536×1024
+- 直接覆盖 `asset/indoor/*.png`，替换了之前代码生成的布局图
+
+### 🔧 IndoorMap底图渲染支持（maps.js）
+- **IndoorMap基类新增 `indoorMapKey` 属性**：子类设置对应的sprite-manifest中的底图key
+- **IndoorMap.drawGrid() 重写**：
+  - 优先使用 `SpriteLoader.getMap(this.indoorMapKey)` 绘制底图PNG（一次drawImage覆盖整个室内区域）
+  - 设置 `this._hasBaseMap` 标记供子类判断
+  - 无底图时 fallback 到原有逐格 `getTileColor()` 纯色渲染
+- **7个子类drawGrid()改造**：
+  - 家具色块绘制包裹在 `if (!this._hasBaseMap)` 条件中（底图已含家具，不重复绘制）
+  - **动态效果始终绘制**：火盆火焰🔥、发电机运行指示灯💡、无线电台状态灯📡、通讯台指示灯、第二暖炉预留区虚线/已建成火焰、灶台火焰
+- **渲染流程**：`子类drawGrid() → super.drawGrid()（底图或fallback）→ 条件家具色块 → 动态特效`
+
+### 📦 sprite-manifest.json 注册室内底图
+- 新增6个室内场景底图条目（`*_indoor`）：
+  - `warehouse_indoor`：320×256, 10×8网格
+  - `medical_indoor`：320×256, 10×8网格
+  - `dorm_a_indoor`：384×256, 12×8网格
+  - `dorm_b_indoor`：384×256, 12×8网格
+  - `kitchen_indoor`：256×256, 8×8网格
+  - `workshop_indoor`：384×256, 12×8网格
+- SpriteLoader 自动加载（基于已有的 maps 遍历逻辑），无需修改 sprite-loader.js
+
+### 📝 代码改动
+- **新增** resize_indoor.py：室内场景图片缩放脚本（gen目录→游戏尺寸+4x备份）
+- asset/sprite-manifest.json：maps 中新增6个 `*_indoor` 底图条目
+- maps.js：IndoorMap 构造函数新增 `indoorMapKey` 属性
+- maps.js：IndoorMap 新增 `drawGrid()` 方法重写（底图PNG优先 + fallback逐格着色）
+- maps.js：DormAMap 构造函数设置 `indoorMapKey = 'dorm_a_indoor'` + drawGrid 家具色块条件绘制
+- maps.js：DormBMap 构造函数设置 `indoorMapKey = 'dorm_b_indoor'` + drawGrid 家具色块条件绘制
+- maps.js：MedicalMap 构造函数设置 `indoorMapKey = 'medical_indoor'` + drawGrid 家具色块条件绘制
+- maps.js：WarehouseMap 构造函数设置 `indoorMapKey = 'warehouse_indoor'` + drawGrid 家具色块条件绘制
+- maps.js：WorkshopMap 构造函数设置 `indoorMapKey = 'workshop_indoor'` + drawGrid 家具色块条件绘制
+- maps.js：KitchenMap 构造函数设置 `indoorMapKey = 'kitchen_indoor'` + drawGrid 家具色块+座位标记条件绘制
+- maps.js：CommandMap 无底图（indoorMapKey未设置），保持原有纯色渲染
+- asset/indoor/*.png：6张室内场景底图替换
+- asset/indoor/*_4x.png：6张4x放大备份版
+
+---
+
+## v3.1 — 美术资源大更新：AI生成建筑图替换 + 抠图 + 角色精灵图全部重绘 (2026-03-04)
+
+### 🏗️ 建筑图替换（replace_buildings.py + remove_bg.py）
+- **AI生成7栋建筑图**：用户通过裁剪工具从AI生成的大图中裁出7张建筑图（`asset/buildings/gen/building_crop_1~7.png`）
+- **布局映射**：按"12/34/567"排列对应 warehouse/medical/dorm_a/dorm_b/kitchen/workshop/command
+- **自动缩放+替换流程**（`replace_buildings.py`）：
+  - 将裁剪图缩放为游戏精灵图（用于SpriteLoader渲染）
+  - 生成4倍版底图合成图（0后缀）
+  - 重新合成村庄底图 `village_base_with_buildings.png`
+- **新增 command 指挥所**：sprite-manifest.json 注册 + maps.js 新增 CommandMap 室内场景（8×6）+ game.js 注册到地图字典
+
+### 🔪 建筑抠图（remove_bg.py）
+- **OpenCV flood fill + FIXED_RANGE**：从图像边缘200+个种子点向内扩散，去除与边缘连通的背景色
+- **每张图独立容差参数**（FUZZ_MAP），防止深色背景建筑被误删
+- **边缘羽化**：对边缘做高斯模糊使透明→不透明过渡更自然
+- **安全检查**：背景比例>95%时警告可能抠过头
+- 抠图效果：19%~33%背景去除，四角透明、建筑主体完整保留
+
+### 🎨 角色精灵图全部重绘
+- **8个核心角色**（李婶/赵铁柱/王策/老钱/苏岩/陆辰/歆玥/清璇）全部由AI重新生成
+- **中国角色风格**：根据每人性格和职业设计外观（参见历史设计方案）
+- **格式保持不变**：96×128像素，3列×4行精灵表（朝下/左/右/上 × 左脚/站立/右脚）
+- 原始大图（3000+×4700+）使用Lanczos滤镜缩放到96×128
+- `texture0.png` 保留为旧版备份
+- **老钱二次更新**：`2老钱texture.png`（1543×2199）缩放替换
+
+### 📝 代码改动
+- **新增** replace_buildings.py：建筑图缩放+替换+底图合成一键脚本
+- **新增** remove_bg.py：OpenCV建筑抠图脚本（flood fill + FIXED_RANGE + 边缘羽化）
+- sprite-manifest.json：新增 command 建筑条目
+- maps.js：新增 CommandMap 室内场景类（8×6，指挥桌/资料架/通讯台/物资箱）
+- game.js：注册 command 到地图字典
+- asset/buildings/*.png：7栋建筑精灵图替换
+- asset/buildings/gen/nobg/：抠图结果
+- asset/character/\*/texture.png：8个角色精灵图全部替换
+- asset/map/village_base_with_buildings.png：重新合成的村庄底图
+
+### 🎨 室内场景PNG图片（generate_indoor_maps.py）
+- 生成6个室内场景布局图到 `asset/indoor/`（原始版+4x放大版）
+- 绿色圆点标注NPC可站立座位，底部中间2格为出口门
+- 4x放大版适合拿去AI重绘室内场景
+
+---
+
+## v3.0 — 5倍速NPC"出门闪现回屋"死循环修复：时间缩放隔离 + 出门保护期 + 饥饿分级冷却 (2026-03-04)
+
+### 🐛 Bug修复：5倍速下NPC反复"走出门→闪现回屋→走出门→闪现回屋"
+
+- **问题现象**：游戏以5倍速运行时，NPC不断循环"走出门→瞬间被传送回室内→又走出门→又被传送回来"，同时显示"肚子饿了"和"采集建材中"两个矛盾状态。1倍速下正常。
+- **根因分析**：5倍速下 `dt` 被放大5倍，所有使用 `dt` 递减的计时器都加速5倍消耗，导致：
+  1. **饥饿触发冷却10秒→2秒真实**：NPC吃完饭2秒后又饿了
+  2. **出门超时3秒→0.6秒真实**：NPC还没走到门口就被强制传送出去
+  3. **饥饿传送15秒→3秒真实**：NPC走路中被强制传送进室内
+  4. **进屋保护期5秒→1秒真实**：NPC刚出门保护期就过了，安全网立即传送回去
+  5. **多系统同帧竞争**：饥饿系统和日程系统/任务系统互相打断导航
+
+### 🔧 修复内容（7 项关键改动）
+
+#### 1. `_indoorEntryProtection` 改用真实时间递减
+- **修复前**：`_indoorEntryProtection -= dt`（5倍速下5秒保护期只持续1秒真实时间）
+- **修复后**：`_indoorEntryProtection -= _realDt`（`_realDt = dt / speedMult`，5秒保护期 = 5秒真实时间）
+
+#### 2. `_hungerTravelTimer` 改用真实时间递减
+- **修复前**：`_hungerTravelTimer += dt`（5倍速下15秒超时只需3秒真实时间）
+- **修复后**：使用真实时间递增，15秒超时 = 15秒真实时间
+
+#### 3. `_exitDoorTimer` 改用真实时间递减
+- **修复前**：`_exitDoorTimer += dt`（5倍速下3秒超时只需0.6秒真实时间）
+- **修复后**：使用真实时间递增，3秒超时 = 3秒真实时间
+
+#### 4. 所有出门路径设置5秒出门保护期
+- `_walkToDoorAndExit` 近距离直接出门：`_indoorEntryProtection = 5`
+- `_updateDoorWalk` 走到门口后传送出门：`_indoorEntryProtection = 5`
+- `_updateDoorWalk` 超时强制传送出门：`_indoorEntryProtection = 5`
+- `_updateDoorWalk` 路径为空兜底传送出门：`_indoorEntryProtection = 5`
+- 出门保护期内安全网不执行，防止NPC刚出门就被传送回室内
+
+#### 5. 出门时清理 `_pendingEnterScene`
+- `_walkToDoorAndExit` 中设置 `_pendingEnterScene = null`
+- 防止残留的进门标记导致NPC走出门后又被自动进门逻辑拉回室内
+
+#### 6. 吃完饭设20秒真实时间饱食冷却
+- **修复前**：`_hungerTriggerCooldown = 30`（30真实秒）
+- **修复后**：`_hungerTriggerCooldown = 20`（20真实秒，更合理）
+- 冷却期内常规饥饿（hunger < 35）不触发，避免频繁打断日程
+
+#### 7. hunger < 15 / hunger < 10 极度饥饿无视冷却
+- **修复前**：P0 强制进食（hunger < 15）和打断睡眠（hunger < 10）都检查 `_hungerTriggerCooldown`
+- **修复后**：极度饥饿（hunger < 15 和 hunger < 10）无视冷却直接触发进食，确保NPC在极端消耗下不会饿死
+- 20秒真实冷却到期时 hunger 正常约在45左右（远未到15），不会误触发
+
+### 📝 代码改动
+- npc.js: `_indoorEntryProtection` 递减改用 `_realDt`（真实时间）
+- npc.js: `_updateDoorWalk` 中 `_exitDoorTimer` 改用真实时间递增 + 3个出门路径添加 `_indoorEntryProtection = 5`
+- npc.js: `_walkToDoorAndExit` 近距离出门路径添加 `_indoorEntryProtection = 5` + `_pendingEnterScene = null`
+- npc.js: `_walkToDoorAndExit` 远距离出门路径添加 `_pendingEnterScene = null`
+- npc.js: `_startEating` 完成后饱食冷却 30 → 20 真实秒
+- npc.js: P0 hunger < 15 强制进食移除 `_hungerTriggerCooldown` 检查
+- npc.js: P0 hunger < 10 打断睡眠移除 `_hungerTriggerCooldown` 检查
+
+---
+
+## v2.9 — 室内位置循环重置修复：消除 _teleportTo 随机偏移 + distToInside 无限导航循环 (2026-03-04)
+
+### 🐛 Bug修复：NPC在室内不断"走到一个位置就重置位置"，无法走出房间
+
+- **问题现象**：NPC 进入室内后不断被重置位置——走到一个位置就被拉回来，走到一个位置又被拉回来，反复循环，导致 NPC 很长时间无法走出房间执行其他任务
+- **根因分析**：v2.8 的 `_enterIndoor` 修复了堵门口问题（直接传送到座位），但引入了新的循环 bug。3 个代码路径形成无限循环：
+
+  **循环触发链路**：
+  1. `_enterIndoor` 使用 `_teleportTo()` 传送到座位，但 `_teleportTo` 默认模式有 **±1.5 格随机偏移**
+  2. NPC 传送后实际位置 ≠ 座位精确坐标（如座位 (6,5) 但实际传送到 (6.8, 4.2)）
+  3. 下一帧 `_navigateToScheduleTarget()` / `_updateSchedule()` 检测到 NPC 已在目标室内场景，但 `_enterWalkTarget = null` → 调用 `_pickIndoorSeat()` **随机选了一个新座位**
+  4. 计算 `distToInside`，如果新座位和当前位置距离 > 3 格 → 设置 `_enterWalkTarget`，调用 `_pathTo` 导航
+  5. 到达后清空 `_enterWalkTarget` → 下一帧又重复步骤 3-4，**无限循环**
+
+  同样的循环逻辑存在于 3 处代码中：
+  - `_updateSchedule()`（日程检查中的"已在室内"分支）
+  - `_navigateToScheduleTarget()`（跨场景导航中的"已在室内"分支）
+  - `_actionOverride` 行动覆盖系统（"已在室内"分支）
+
+### 🔧 修复内容（3 个关键改动）
+
+#### 1. `_enterIndoor()` 改为精确像素坐标设置（不再使用 `_teleportTo`）
+- **修复前**：`this._teleportTo(insideLoc.scene, insideLoc.x, insideLoc.y)` — 带 ±1.5 格随机偏移
+- **修复后**：直接设置 `this.currentScene = scene; this.x = x * TILE; this.y = y * TILE;` — **零偏移精确传送**
+- 同时设置 `_indoorEntryProtection = 3`（3秒进屋保护期，防止刚进屋就被其他系统拉出去）
+
+#### 2. `_navigateToScheduleTarget()` 和 `_updateSchedule()` 中"已在室内"逻辑简化
+- **修复前**：NPC 已在目标室内场景时，仍然调用 `_pickIndoorSeat()` 选新座位 → 检查 `distToInside` → 寻路导航 → 形成循环
+- **修复后**：NPC 只要在目标室内场景中 → **直接 `scheduleReached = true`**，不再反复选座位和寻路
+
+#### 3. `_actionOverride` 行动覆盖系统中"已在室内"逻辑简化
+- **修复前**：同上，反复选座位 + `distToInside` 检查 + 寻路循环
+- **修复后**：NPC 在目标室内场景中 → **直接 `_onActionArrived(game)`**
+
+### 📝 代码改动
+- npc.js: `_enterIndoor()` — 移除 `_teleportTo` 调用，改为精确像素坐标设置 `this.x = x * TILE; this.y = y * TILE;` + 新增 `_indoorEntryProtection = 3`
+- npc.js: `_updateSchedule()` — "已在室内"分支简化为 `scheduleReached = true; _enterWalkTarget = null; return;`
+- npc.js: `_navigateToScheduleTarget()` — "已在室内"分支简化为 `scheduleReached = true; _enterWalkTarget = null; return;`
+- npc.js: `_actionOverride` — "已在室内"分支简化为 `_onActionArrived(game); return;`
+- npc.js: 移除所有 3 处 `distToInside` 变量及相关判定逻辑
+
+---
+
+## v2.8 — 室内堵门口修复：统一进门方法 + 室内场景 PNG 图片生成 (2026-03-04)
+
+### 🐛 Bug修复：NPC 进屋后堵在门口吃饭睡觉
+
+- **问题现象**：NPC 进入宿舍/厨房等室内后，全部堆在门口（y=7）位置，在门口吃饭、睡觉，不走到房间内部的床/桌子位置
+- **根因分析**：
+  - 所有10处进门代码路径都采用"**先传送到 `indoor_door` 门口 (y=7) → 再 `_pathTo` 寻路走到座位**"的两步模式
+  - 室内空间太小（8格高），y=7 是南墙整行（仅门口2格可走），NPC 横向无法移动
+  - 家具碰撞把可走区域切分成多个独立区域，从门口 (y=7) 到座位 (y=2~5) 的寻路经常失败
+  - 寻路失败后 NPC 卡在门口，日程系统的 `distToInside <= 3` 宽松判定又把门口误判为"已到达"
+
+### 🔧 修复内容
+
+#### 1. 新增统一进门方法 `_enterIndoor(targetScene, game)`
+- 选择未被占用的座位（`_pickIndoorSeat`）
+- **直接传送到座位位置**，跳过门口中转
+- 设置 `scheduleReached = true` + 清除所有移动状态
+
+#### 2. 全部 10 处进门代码统一替换
+| 代码位置 | 触发场景 |
+|---------|---------|
+| followPath 走完后 | 走到建筑门口，自动进门 |
+| 日程系统门口5格内 | NPC 站在门口附近，直接进门 |
+| 安全网兜底 | scheduleReached=true 但还在村庄 |
+| _pathTo 4格内 / 寻路成功 / 寻路失败 | 多种寻路结果分支 |
+| _followPath 走完 | 另一套移动系统到达门口 |
+| 饥饿系统门口6格 / 超时15秒 | 饿了赶到厨房门口 / 兜底传送 |
+| 状态覆盖→医疗站 | 生病/心理问题紧急就医 |
+| 行动系统超时20秒 | LLM 行动兜底传送 |
+
+### 🎨 新增：室内场景 PNG 图片
+
+生成 6 个室内场景布局图到 `asset/indoor/` 目录：
+
+| 场景 | 原始大小 | 4倍放大版 |
+|------|---------|-----------|
+| warehouse 仓库 | 320×256 | 1280×1024 |
+| medical 医疗站 | 320×256 | 1280×1024 |
+| dorm_a 宿舍A | 384×256 | 1536×1024 |
+| dorm_b 宿舍B | 384×256 | 1536×1024 |
+| kitchen 炊事房 | 256×256 | 1024×1024 |
+| workshop 工坊 | 384×256 | 1536×1024 |
+
+- 绿色小圆点 = NPC可站立的座位位置
+- 底部中间2格 = 出口门
+- 4x放大版适合拿去 AI 重绘
+
+### 📝 代码改动
+- npc.js: 新增 `_enterIndoor(targetScene, game)` 统一进门方法（直接传送到座位）
+- npc.js: 10处"先传送到门口再寻路"代码全部替换为 `_enterIndoor()` 调用
+- **新增** generate_indoor_maps.py: Python PIL 室内场景 PNG 生成脚本
+- **新增** asset/indoor/*.png: 6个室内场景的原始+4x放大版布局图（共12张）
+
+---
+
+## v2.7 — 底图渲染修复：消除黑色方块和棋盘格 (2026-03-04)
+
+### 🐛 Bug修复：底图加载后画面变脏（黑色小方块+棋盘格色差）
+
+- **问题现象**：游戏启动第一瞬间画面干净（纯色 fallback），1秒后底图 PNG 加载完成反而变脏——雪地上出现大量黑色小方块、棋盘格色差、围墙区域整行深棕色方块
+- **排查过程**（历经5轮排查）：
+  1. 第1轮：怀疑 SpriteLoader 的 tile/decoration 小图素材质量差 → 从 manifest 移除 tiles/decorations/buildings → 问题依旧
+  2. 第2轮：怀疑浏览器缓存旧 JS → 添加 Cache-Control + JS 版本号 → 问题依旧
+  3. 第3轮：怀疑底图 PNG 本身有问题 → 像素级扫描确认底图纯雪地区域无暗色方块 → 底图干净
+  4. 第4轮：怀疑 JS 代码在底图之上叠加绘制 → 逐个检查所有 draw 调用 → 无额外绘制
+  5. 第5轮：**在底图渲染前先用纯色清除视口** → 问题解决！**根因是 canvas 残留内容 + 旧底图缓存**
+- **根因分析**：
+  - **根因1**：`generate-map-base.py` 的 `get_tile_color` 函数仍是旧版代码，包含 `(x+y)%5==0`、`(x+y)%3==0`、`(x+y)%7==0` 棋盘格逻辑和围墙返回 `C.FENCE` 深棕色。虽然 `maps.js` 中对应的 `getTileColor` 已修复，但**底图 PNG 是用旧代码生成的**
+  - **根因2**：浏览器可能缓存了旧版底图 PNG（即使 URL 带了 `?v=Date.now()`，但 JS 文件本身被缓存时加载的图片 URL 不变）
+  - **根因3**：`drawGrid` 底图渲染分支没有先清除 canvas 视口区域，导致之前帧的残留内容透出
+
+### 🔧 修复内容
+
+#### 1. 底图生成器修复（generate-map-base.py `get_tile_color`）
+- **安全区内**：移除 `(x+y)%5==0` 棋盘格 → 改用 `lerp_color` 噪声插值平滑渐变
+- **围墙线上**：不再返回 `C.FENCE`（深棕色整格方块）→ 改为雪地渐变色（围墙线条由 `draw_wall()` 叠加绘制）
+- **外围雪原**：移除 `(x+y)%3==0` 和 `(x+y)%7==0` 密集棋盘格 → 改用噪声阈值平滑过渡
+
+#### 2. 底图 PNG 重新生成
+- 执行 `python3 generate-map-base.py --force` 重新生成 `village_base_clean.png` 和 `village_base.png`
+- 像素级验证：纯雪地区域暗色 tile 数量从 182 降至 0
+
+#### 3. drawGrid 底图渲染前清除视口（maps.js）
+- 底图 `drawImage` 前先用 `#E6EAF0`（雪地底色）`fillRect` 填满整个视口区域，确保无 canvas 残留
+
+#### 4. 装饰物/建筑素材渲染移除
+- `sprite-manifest.json` 移除 `tiles` 和 `decorations` 分类（已烘焙到底图 PNG），清空 `buildings`（占位图质量差）
+- `BaseMap.drawDecoration()` 移除 SpriteLoader 素材分支，始终使用代码绘制
+
+#### 5. 浏览器缓存彻底解决
+- `server.js` 对 `.js/.css/.json/.html` 文件设置 `Cache-Control: no-cache, no-store, must-revalidate`
+- `index.html` 所有 `<script>` 标签添加版本号参数 `?v=20260304b`
+- 底图 URL 在 `sprite-loader.js` 中已使用 `?v=Date.now()` 动态时间戳
+
+### 📝 代码改动
+- generate-map-base.py: `get_tile_color()` 移除3处棋盘格逻辑 + 围墙改为雪地渐变色
+- maps.js: `drawGrid()` 底图分支增加纯色预清除 + 增强调试标记显示底图尺寸和文件名
+- maps.js: `BaseMap.drawDecoration()` 移除 SpriteLoader 素材分支
+- asset/sprite-manifest.json: 移除 tiles/decorations 分类，清空 buildings
+- server.js: 添加 `Cache-Control: no-cache, no-store, must-revalidate` 响应头
+- index.html: 所有 script 标签添加 `?v=20260304b` 版本号
+- asset/map/village_base_clean.png: 重新生成（消除棋盘格和暗色方块）
+- asset/map/village_base.png: 重新生成（带标注版）
+
+---
+
+## v2.6 — 素材图片系统（Sprite Asset Pipeline）(2026-03-04)
+
+### 🎨 素材加载器系统（sprite-loader.js）
+- **SpriteLoader 模块**：统一的素材加载和管理模块，基于 `sprite-manifest.json` 清单文件批量预加载所有 PNG 素材
+- **异步预加载**：游戏启动时异步加载所有素材图片，不阻塞游戏启动，加载完毕后自动切换到图片绘制模式
+- **统一接口**：`SpriteLoader.get(category, name)` 获取素材图片，`drawTile/drawDecoration/drawBuilding` 便捷绘制
+- **Graceful Fallback**：素材未加载完毕或图片不存在时，自动回退到纯代码绘制（Canvas 程序化绘制）
+- **运行时开关**：`SpriteLoader.enabled = false` 可随时禁用图片素材回到纯代码绘制
+- **加载进度追踪**：`SpriteLoader.progress` 返回 0~1 的加载进度
+
+### 📦 素材目录结构
+- **`asset/tiles/`**：11 张地砖素材（32×32 PNG）
+  - snow / snow_dark / snow_light — 雪地三种变体
+  - path / path_dark — 踩过的雪路
+  - plaza — 广场石砖
+  - dirt — 冻土
+  - ice / ice_deep — 冰面
+  - sand — 雪覆盖沙地
+  - wall_stone — 围墙石砖
+- **`asset/decorations/`**：13 张装饰物素材（32×32 PNG）
+  - tree / bush / snowpile / icicle — 自然物
+  - debris / bench / lamppost / lamppost_lit / sign / well — 建筑物件
+  - flower_pink / flower_yellow / flower_blue — 花卉
+- **`asset/buildings/`**：7 张建筑素材（多尺寸 PNG）
+  - warehouse (192×192) / dorm_a (160×160) / dorm_b (160×160)
+  - medical (128×160) / kitchen (160×160) / workshop (160×160) / command (128×128)
+
+### 🔧 地图渲染引擎改造（maps.js）
+- **drawGrid 改造**：新增 `_colorToSprite` 颜色→素材名映射表，绘制地砖时优先使用 `SpriteLoader.drawTile()`，图片不可用时 fallback 到代码纹理绘制
+- **drawDecoration 改造**：装饰物绘制时优先使用 `SpriteLoader.drawDecoration()`，支持路灯昼夜自动切换（lamppost / lamppost_lit）
+- **建筑 draw 改造**：建筑绘制时优先使用 `SpriteLoader.drawBuilding()`，通过建筑 `id` 自动匹配素材文件名，图片绘制成功后仅叠加名称标签
+
+### 🛠️ 素材制作工具（generate-sprites.py）
+- **Python Pillow 占位符生成器**：自动生成带像素风纹理的占位符 PNG 素材
+  - 地砖：逐像素噪声纹理 + 雪点/冰裂纹/石砖缝等细节
+  - 装饰物：树/灌木/雪堆/冰锥/废墟/长椅/路灯/告示牌/水井/花卉
+  - 建筑：砖缝纹理 + 三角形屋顶 + 积雪层 + 窗户 + 门 + 烟囱
+- **sprite-manifest.json**：素材清单文件，记录所有素材的路径、尺寸、描述信息
+- **热替换支持**：用像素画工具（Aseprite/Piskel/LibreSprite）替换 PNG 文件后刷新浏览器即可生效，无需改代码
+
+### 📝 代码改动
+- **新增** sprite-loader.js：素材加载器模块（SpriteLoader 单例 + load/get/drawTile/drawDecoration/drawBuilding）
+- **新增** generate-sprites.py：占位符素材批量生成脚本（Pillow）
+- **新增** asset/sprite-manifest.json：素材清单
+- **新增** asset/tiles/*.png：11 张地砖素材
+- **新增** asset/decorations/*.png：13 张装饰物素材
+- **新增** asset/buildings/*.png：7 张建筑素材
+- index.html：引入 sprite-loader.js（在 maps.js 之前）
+- maps.js：BaseMap 新增 `_colorToSprite` 静态映射表 + drawGrid/drawDecoration/建筑draw 优先图片绘制 + fallback
+- game.js：游戏启动时异步调用 `SpriteLoader.load()` 加载素材
+
+---
+
 ## v2.5 — 全员入睡跳夜机制 (2026-03-01)
 
 ### 🌙 新增：全员入睡→快进到早6点（game.js `_checkNightSkip`）
@@ -31,7 +591,7 @@
   - **根因**：`_updateActionEffect()` 用 `this.stateDesc` 匹配 `ACTION_EFFECT_MAP` 关键词，但 LLM `_actionDecision()` 返回的 `action.reason`（如"前往伐木场协助采集"）会覆盖 `stateDesc`，导致原本的日程关键词（如"砍柴"、"伐木"）丢失，匹配失败。
   - **修复**：`_updateActionEffect()` 现在同时匹配 `stateDesc` 和日程原始 `scheduleTemplate[schedIdx].desc`，两者任一命中即可触发效果。
 
-- **LLM安抚已死角色**：存活NPC（如王策、清璇）反复决策"去安抚陆辰/凌玥"——但这些人已经死亡，浪费大量行动时间。
+- **LLM安抚已死角色**：存活NPC（如王策、清璇）反复决策"去安抚陆辰/歆玥"——但这些人已经死亡，浪费大量行动时间。
   - **根因**：`allNPCStatus`（行动决策prompt）、`sameSceneNPCs`（思考prompt）、`_getNearbyNPCs()`（附近感知）、`friendsInCrisis`（挚友告警）这4处NPC列表构建均未过滤 `isDead` 的NPC。
   - **修复**：在以上4处全部添加 `!n.isDead` 过滤条件，确保死亡NPC不再出现在任何LLM prompt中。
 
@@ -66,7 +626,7 @@
 
 ### 👴 老钱指挥中心（game.js + death-system.js）
 - **`_initWorkPlan()`**：Game构造函数和 `reincarnate()` 中调用，生成workPlan并存储到老钱
-- **`getWorkPlanHolder()`**：返回当前workPlan持有者（老钱→王策→李婶→凌玥继任链）
+- **`getWorkPlanHolder()`**：返回当前workPlan持有者（老钱→王策→李婶→歆玥继任链）
 - **`_handleWorkPlanTransfer()`**：NPC死亡时自动将workPlan转移给下一个继任者
 - **`getWorkPlanSummaryForNpc(npcId)`**：返回给特定NPC看的安排摘要（本人任务★标记+全镇概览）
 - **`getLessonsForNpc(npcId)`**：返回与特定NPC相关的前世教训
@@ -138,7 +698,7 @@
 - 补充苏岩17-18点desc关键词（匹配medical_heal）
 - 补充苏岩22-24点desc关键词（匹配craft_medkit）
 - 补充陆辰22-24点desc关键词（匹配patrol_bonus）
-- 补充凌玥22-24点desc关键词（匹配morale_boost）
+- 补充歆玥22-24点desc关键词（匹配morale_boost）
 - 补充清璇13-15点desc关键词（匹配reduce_waste）
 
 ### 💊 急救包系统重构（resource-system.js + npc.js + game.js + index.html + style.css）
@@ -538,11 +1098,11 @@
 
 ## v1.1 — San 值系统增强：发疯 + 演出 + 心理咨询 (2026-02-17)
 
-### 🎵 凌玥文艺演出（San值恢复 — 少量花钱）
+### 🎵 歆玥文艺演出（San值恢复 — 少量花钱）
 - 演出时间：**14:00-16:00 广场**、**19:00-21:00 酒馆驻唱**
 - 同场景NPC自动观看，San值恢复 **+0.20/秒**
-- 观众花费约 **1元/次**（少量），凌玥获得 0.04/秒演出收入
-- 非演出时间，酒馆内有凌玥也有微量 San 值氛围恢复（+0.03/秒，免费）
+- 观众花费约 **1元/次**（少量），歆玥获得 0.04/秒演出收入
+- 非演出时间，酒馆内有歆玥也有微量 San 值氛围恢复（+0.03/秒，免费）
 
 ### 💬 苏医生心理咨询（San值恢复 — 大量花钱）
 - 条件：NPC在医院 + 苏医生在岗 + NPC存款≥10
@@ -565,7 +1125,7 @@
 
 ### 📝 代码改动
 - npc.js: 新增 `isCrazy`/`isWatchingShow`/`isInTherapy` 属性 + 序列化
-- npc.js: 凌玥演出检测 + 自动观看 + 收费逻辑
+- npc.js: 歆玥演出检测 + 自动观看 + 收费逻辑
 - npc.js: 苏医生心理咨询检测 + 自动触发 + 收费逻辑
 - npc.js: 发疯状态机（触发/表现/恢复）
 - npc.js: think() 发疯短路（发疯时随机乱走，不调用LLM）
@@ -580,29 +1140,29 @@
 ### 🎭 角色属性重构
 - **李婶** 55→42岁，丧夫多年独自带大儿子
 - **赵大厨** 42→38岁，暗恋李婶
-- **王老师** 38→32岁，暗恋凌玥
+- **王老师** 38→32岁，暗恋歆玥
 - **老钱** 65→60岁，清璇的爷爷→孙女，操心孙女婚事
-- **苏医生** 45→35岁，改为男性，暗恋凌玥（三角关系核心）
-- **凌玥** 28→22岁，被苏医生和王老师同时追求
+- **苏医生** 45→35岁，改为男性，暗恋歆玥（三角关系核心）
+- **歆玥** 28→22岁，被苏医生和王老师同时追求
 - **陆辰** 12→18岁，大学生假期回乡，暗恋清璇
 - **清璇** 17岁男→16岁女，改为老钱的孙女/文学少女，与陆辰青春暗恋线
 
 ### 💕 三条情感主线
 1. 中年暖心线：赵大厨(♂38) → 李婶(♀42)
-2. 三角关系：苏医生(♂35) vs 王老师(♂32) → 凌玥(♀22)
+2. 三角关系：苏医生(♂35) vs 王老师(♂32) → 歆玥(♀22)
 3. 青春暗恋：陆辰(♂18) ↔ 清璇(♀16)
 
 ### 💘 差异化初始好感度
 - 赵大厨→李婶 75 / 李婶→赵大厨 65
-- 苏医生→凌玥 70 / 王老师→凌玥 68
-- 凌玥→苏医生 60 / 凌玥→王老师 62
+- 苏医生→歆玥 70 / 王老师→歆玥 68
+- 歆玥→苏医生 60 / 歆玥→王老师 62
 - 陆辰→清璇 72 / 清璇→陆辰 65
 - 其他关系默认 50
 
 ### 🎨 素材更新
 - 苏医生: 使用瑞恩(29岁男性)形象
 - 清璇: 使用阿比盖尔(女高中生)形象
-- 凌玥: 使用塔玛拉形象
+- 歆玥: 使用塔玛拉形象
 
 ### 📝 代码改动
 - npc.js: 全部8人age/gender/personality/schedule/attrs更新
@@ -691,6 +1251,7 @@ AI轮询加速3倍、丰富晚间社交活动、睡眠安全机制。
 ### Phase 8: 🎯 行动效果数值化 + 急救包重构 ✅
 ### Phase 9: ⚔️ 难度系统 + UI优化 ✅
 ### Phase 10: 🧠 智能分工协调系统 ✅
+### Phase 11: 🏗️ v4.0 全项目模块化重构 ✅
 
 - [x] 8 个 NPC + 固定日程 + 天气动态调整
 - [x] AI 决策 + 轮询加速
@@ -703,7 +1264,7 @@ AI轮询加速3倍、丰富晚间社交活动、睡眠安全机制。
 - [x] 进出门自然过渡 + 防堵门
 - [x] 角色性别/年龄/情感关系重构 + 差异化好感度
 - [x] 心情值系统 + 属性变化速率分级
-- [x] San值系统增强：凌玥演出恢复 + 苏医生心理咨询 + 三级恢复体系
+- [x] San值系统增强：歆玥演出恢复 + 苏医生心理咨询 + 三级恢复体系
 - [x] 发疯机制：San<15触发 → 乱走/胡话/属性暴降/关系恶化
 - [x] NPC环境感知增强：同场景远距离感知 + AI prompt 强调
 - [x] wantChat 走向远处NPC：NPC可以主动走过去找人聊天
@@ -747,7 +1308,7 @@ AI轮询加速3倍、丰富晚间社交活动、睡眠安全机制。
 - [x] 智能分工系统：generateWorkPlan()基于前世轮回记忆自动生成最优分工方案（精确到人/任务/目标量/原因）
 - [x] 前世教训深度分析：_generateDeepLessons()分层教训（战略/战术/执行）+ 资源比例/人力/时序/因果链分析
 - [x] 多世学习演进：analyzeMultiLifePatterns()识别成功策略模式和反复失败模式
-- [x] 老钱指挥中心：workPlan存储在老钱身上 + 死亡时自动转移给继任者（王策→李婶→凌玥）
+- [x] 老钱指挥中心：workPlan存储在老钱身上 + 死亡时自动转移给继任者（王策→李婶→歆玥）
 - [x] workPlan驱动任务生成：_generateTasksFromWorkPlan()替代硬编码任务分配
 - [x] NPC死亡任务重分配：reassignDeadNpcTasks()按专长匹配重分配未完成任务
 - [x] 暴风雪天气应急：onWeatherEmergency()自动将户外任务转为室内维护暖炉
@@ -756,6 +1317,32 @@ AI轮询加速3倍、丰富晚间社交活动、睡眠安全机制。
 - [x] Bug修复：eventLog未初始化导致_initWorkPlan中addEvent crash
 - [x] 🔴 ~~采集产出量修复~~：v2.4修复 — `_updateActionEffect()` 双路径关键词匹配（stateDesc ∪ scheduleDesc）
 - [x] 🔴 ~~死亡NPC从prompt过滤~~：v2.4修复 — allNPCStatus/sameSceneNPCs/_getNearbyNPCs/friendsInCrisis 全部添加 isDead 过滤
+- [x] **v4.0 模块化重构**：26,700行单体代码 → 49个模块文件（7层分类）
+- [x] GST 命名空间 + IIFE 隔离 + 向后兼容别名层
+- [x] NPC系统拆分：8,370行 npc.js → 7个文件（核心类+6个 proto mixin，79个方法挂载）
+- [x] Game引擎拆分：3,794行 game.js → 6个文件（核心调度+renderer/input/camera/hud/startup）
+- [x] 地图系统拆分：maps.js → 12个文件（BaseMap/VillageMap/IndoorMap×7/MapRegistry）
+- [x] 数据与逻辑分离：7个 data/*.js 纯配置文件（NPC配置/日程/prompt/效果/地图/任务/事件）
+- [x] 素材清理：移除旧版 *0.png + gen/ 目录，仅保留最终版76个素材文件
+- [x] 工具脚本统一收纳到 tools/ 目录
+- [x] 启动脚本路径修复：restart.py/start-tmux.sh 的 PROJECT_DIR 上溯到父目录
+- [x] guide 文档全面更新：start.md/guide.md/06-tech.md/08-changelog.md/09-pitfalls.md
+- [x] 素材图片系统（sprite-loader.js）：SpriteLoader异步预加载 + drawTile/drawDecoration/drawBuilding + graceful fallback
+- [x] 素材清单（sprite-manifest.json）：tiles(11) + decorations(13) + buildings(7) 完整素材目录
+- [x] 地图渲染引擎改造：drawGrid/drawDecoration/建筑draw 优先使用图片素材 + _colorToSprite映射表
+- [x] 占位符素材生成器（generate-sprites.py）：Python Pillow批量生成像素风纹理PNG + 热替换支持
+- [x] 底图渲染修复：消除棋盘格+黑色方块，同步Python/JS地面颜色逻辑，重新生成底图PNG
+- [x] 装饰物/建筑回归代码绘制：从manifest移除tiles/decorations/buildings占位图，等有真正美术素材再启用
+- [x] 浏览器缓存解决：server.js添加Cache-Control:no-cache + index.html添加JS版本号参数
+- [x] drawGrid底图渲染前清除视口：防止canvas残留内容透出
+- [x] 室内堵门口修复：统一 `_enterIndoor()` 方法，10处进门代码全部替换为直接传送到座位
+- [x] 室内场景PNG图片：6个场景布局图生成到 `asset/indoor/`（generate_indoor_maps.py）
+- [x] 室内循环重置修复：`_enterIndoor` 改精确像素坐标（不用 `_teleportTo`）+ 移除 `distToInside` 循环判定
+- [x] "已在室内"检查简化：`_updateSchedule/_navigateToScheduleTarget/_actionOverride` 中 NPC 已在目标室内→直接标记到达
+- [x] 室内场景AI底图替换：6张AI生成室内图（resize_indoor.py缩放）替换代码生成的布局图
+- [x] IndoorMap底图渲染：indoorMapKey属性 + drawGrid()重写（SpriteLoader底图优先 + fallback逐格着色）
+- [x] 7个室内子类改造：家具色块条件绘制（底图模式跳过）+ 动态效果始终绘制（火焰/指示灯等）
+- [x] sprite-manifest注册室内底图：6个 `*_indoor` 条目，SpriteLoader自动加载
 - [ ] 🟡 San值崩溃速度调优：第2天清晨3小时内5人精神崩溃致死，户外寒冷+死亡惩罚+San<30恶性循环三者叠加形成不可逆的"死亡螺旋"
 - [ ] 🟡 食物消耗异常排查：第1天实际消耗64单位 vs 设计预期24单位（2.6倍差异），需逐环排查消耗触发点
 - [ ] 🟡 资源消耗日志增强：每次资源消耗记录触发原因和具体数量（目前只有每小时总量，无法定位异常消耗来源）
