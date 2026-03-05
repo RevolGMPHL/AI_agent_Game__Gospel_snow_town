@@ -1,0 +1,67 @@
+{
+  "_description": "福音雪镇 素材清单 — 所有图片均为 PNG 格式，坐标单位为像素",
+  "_tile_size": 32,
+  "_制作说明": "你可以用 Aseprite / Piskel / LibreSprite 等像素画工具替换这些文件",
+  "_注意": "tiles 和 decorations 已烘焙到底图 PNG 中，不再单独加载小图素材",
+  "_buildings说明": "建筑图片素材，key 与 maps.js 中 buildings[].id 对应",
+  "buildings": {
+    "warehouse": { "file": "asset/buildings/warehouse.png", "desc": "仓库" },
+    "medical":   { "file": "asset/buildings/medical.png",   "desc": "医疗站" },
+    "dorm_a":    { "file": "asset/buildings/dorm_a.png",    "desc": "宿舍A" },
+    "dorm_b":    { "file": "asset/buildings/dorm_b.png",    "desc": "宿舍B" },
+    "kitchen":   { "file": "asset/buildings/kitchen.png",   "desc": "炊事房" },
+    "workshop":  { "file": "asset/buildings/workshop.png",  "desc": "工坊" },
+    "command":   { "file": "asset/buildings/command.png",   "desc": "指挥所" }
+  },
+  "maps": {
+    "village_base": {
+      "file": "asset/map/village_base_clean.png",
+      "file_annotated": "asset/map/village_base.png",
+      "size": [
+        1600,
+        1280
+      ],
+      "grid": [
+        50,
+        40
+      ],
+      "desc": "末日据点主地图底图（含地面/围墙/装饰物，不含建筑和NPC）"
+    },
+    "warehouse_indoor": {
+      "file": "asset/indoor/warehouse.png",
+      "size": [320, 256],
+      "grid": [10, 8],
+      "desc": "仓库室内底图"
+    },
+    "medical_indoor": {
+      "file": "asset/indoor/medical.png",
+      "size": [320, 256],
+      "grid": [10, 8],
+      "desc": "医疗站室内底图"
+    },
+    "dorm_a_indoor": {
+      "file": "asset/indoor/dorm_a.png",
+      "size": [384, 256],
+      "grid": [12, 8],
+      "desc": "宿舍A室内底图"
+    },
+    "dorm_b_indoor": {
+      "file": "asset/indoor/dorm_b.png",
+      "size": [384, 256],
+      "grid": [12, 8],
+      "desc": "宿舍B室内底图"
+    },
+    "kitchen_indoor": {
+      "file": "asset/indoor/kitchen.png",
+      "size": [256, 256],
+      "grid": [8, 8],
+      "desc": "炊事房室内底图"
+    },
+    "workshop_indoor": {
+      "file": "asset/indoor/workshop.png",
+      "size": [384, 256],
+      "grid": [12, 8],
+      "desc": "工坊室内底图"
+    }
+  }
+}

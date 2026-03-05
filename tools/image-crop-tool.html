@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图片网格切割工具</title>
+<style>
+/* ========== 全局重置与深色主题 ========== */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; font-size: 13px; }
+
+/* ========== 主布局 ========== */
+.app { display: flex; width: 100%; height: 100%; }
+
+/* ========== 左侧工具栏 ========== */
+.sidebar {
+  width: 240px; min-width: 240px; height: 100%;
+  background: #16213e; border-right: 1px solid #0f3460;
+  display: flex; flex-direction: column; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #0f3460 transparent;
+}
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 2px; }
+
+.sidebar-section {
+  padding: 12px 14px; border-bottom: 1px solid #0f3460;
+}
+.sidebar-section h3 {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  color: #8892b0; margin-bottom: 10px; letter-spacing: 0.5px;
+}
+
+/* 上传区域 */
+.upload-area {
+  border: 2px dashed #0f3460; border-radius: 8px; padding: 20px 12px;
+  text-align: center; cursor: pointer; transition: all 0.2s;
+  background: rgba(15, 52, 96, 0.2);
+}
+.upload-area:hover, .upload-area.drag-over {
+  border-color: #e94560; background: rgba(233, 69, 96, 0.1);
+}
+.upload-area .icon { font-size: 28px; margin-bottom: 6px; }
+.upload-area .text { font-size: 12px; color: #8892b0; }
+.upload-area .text strong { color: #e94560; }
+#fileInput { display: none; }
+
+/* 网格设置 */
+.grid-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.grid-btn {
+  flex: 1; min-width: 48px; padding: 6px 4px; border: 1px solid #0f3460;
+  background: transparent; color: #8892b0; border-radius: 4px;
+  cursor: pointer; font-size: 11px; text-align: center; transition: all 0.15s;
+}
+.grid-btn:hover { border-color: #e94560; color: #e0e0e0; }
+.grid-btn.active { border-color: #e94560; background: rgba(233, 69, 96, 0.2); color: #e94560; font-weight: 600; }
+
+/* 工具模式按钮 */
+.tool-buttons { display: flex; gap: 6px; }
+.tool-btn {
+  flex: 1; padding: 8px 6px; border: 1px solid #0f3460;
+  background: transparent; color: #8892b0; border-radius: 6px;
+  cursor: pointer; font-size: 12px; text-align: center; transition: all 0.15s;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.tool-btn .icon { font-size: 18px; }
+.tool-btn .label { font-size: 10px; }
+.tool-btn:hover { border-color: #e94560; color: #e0e0e0; }
+.tool-btn.active { border-color: #e94560; background: rgba(233, 69, 96, 0.25); color: #e94560; }
+
+/* 操作按钮 */
+.action-buttons { display: flex; flex-direction: column; gap: 6px; }
+.action-btn {
+  width: 100%; padding: 7px 10px; border: 1px solid #0f3460;
+  background: transparent; color: #8892b0; border-radius: 4px;
+  cursor: pointer; font-size: 12px; text-align: left; transition: all 0.15s;
+  display: flex; align-items: center; gap: 8px;
+}
+.action-btn:hover { border-color: #e94560; color: #e0e0e0; background: rgba(233, 69, 96, 0.1); }
+.action-btn .shortcut { margin-left: auto; font-size: 10px; opacity: 0.5; }
+
+/* 导出按钮 */
+.export-btn {
+  width: 100%; padding: 10px; border: none; border-radius: 6px;
+  background: #e94560; color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s; letter-spacing: 0.3px;
+}
+.export-btn:hover { background: #d63651; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(233, 69, 96, 0.3); }
+.export-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* 缩放控制 */
+.zoom-controls { display: flex; align-items: center; gap: 6px; }
+.zoom-display { flex: 1; text-align: center; font-size: 12px; color: #e94560; font-weight: 600; }
+.zoom-btn {
+  padding: 4px 10px; border: 1px solid #0f3460; background: transparent;
+  color: #8892b0; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.15s;
+}
+.zoom-btn:hover { border-color: #e94560; color: #e0e0e0; }
+
+/* ========== 中间画布区域 ========== */
+.canvas-container {
+  flex: 1; position: relative; overflow: hidden;
+  background: #0a0a1a;
+  background-image:
+    linear-gradient(45deg, #111128 25%, transparent 25%),
+    linear-gradient(-45deg, #111128 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #111128 75%),
+    linear-gradient(-45deg, transparent 75%, #111128 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+.canvas-wrapper {
+  position: absolute; top: 0; left: 0;
+  transform-origin: 0 0;
+}
+.canvas-wrapper canvas {
+  position: absolute; top: 0; left: 0;
+  image-rendering: pixelated;
+}
+
+/* 欢迎占位 */
+.welcome-overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: #8892b0; pointer-events: none;
+}
+.welcome-overlay.hidden { display: none; }
+.welcome-overlay .icon { font-size: 64px; margin-bottom: 16px; opacity: 0.4; }
+.welcome-overlay .title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+.welcome-overlay .desc { font-size: 13px; opacity: 0.6; }
+
+/* ========== 底部状态栏 ========== */
+.status-bar {
+  position: absolute; bottom: 0; left: 240px; right: 0; height: 28px;
+  background: #16213e; border-top: 1px solid #0f3460;
+  display: flex; align-items: center; padding: 0 12px; gap: 20px;
+  font-size: 11px; color: #8892b0; z-index: 100;
+}
+.status-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.status-item .label { opacity: 0.6; }
+.status-item .value { color: #e94560; font-weight: 500; }
+
+/* ========== 涂抹光标 ========== */
+.canvas-container.mode-brush { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="8" fill="none" stroke="%23e94560" stroke-width="2"/><circle cx="10" cy="10" r="2" fill="%23e94560"/></svg>') 10 10, crosshair; }
+.canvas-container.mode-rect { cursor: crosshair; }
+.canvas-container.mode-erasing { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect x="3" y="3" width="14" height="14" rx="2" fill="none" stroke="%23ff6b6b" stroke-width="2"/><line x1="6" y1="6" x2="14" y2="14" stroke="%23ff6b6b" stroke-width="2"/><line x1="14" y1="6" x2="6" y2="14" stroke="%23ff6b6b" stroke-width="2"/></svg>') 10 10, crosshair; }
+.canvas-container.mode-panning { cursor: grab; }
+.canvas-container.mode-panning:active { cursor: grabbing; }
+
+/* ========== 导出预览弹窗 ========== */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center;
+  z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+}
+.modal-overlay.visible { opacity: 1; pointer-events: auto; }
+.modal {
+  background: #16213e; border: 1px solid #0f3460; border-radius: 12px;
+  padding: 24px; min-width: 400px; max-width: 600px; max-height: 80vh;
+  overflow-y: auto; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.modal h2 { font-size: 16px; margin-bottom: 16px; color: #e0e0e0; }
+.modal-preview {
+  background: #0a0a1a; border-radius: 8px; padding: 16px; margin-bottom: 16px;
+  display: flex; align-items: center; justify-content: center; min-height: 150px;
+  background-image:
+    linear-gradient(45deg, #1a1a2e 25%, transparent 25%),
+    linear-gradient(-45deg, #1a1a2e 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1a1a2e 75%),
+    linear-gradient(-45deg, transparent 75%, #1a1a2e 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0px;
+}
+.modal-preview img { max-width: 100%; max-height: 300px; image-rendering: pixelated; }
+.modal-info { font-size: 12px; color: #8892b0; margin-bottom: 16px; }
+.modal-input-group { margin-bottom: 16px; }
+.modal-input-group label { display: block; font-size: 12px; color: #8892b0; margin-bottom: 6px; }
+.modal-input-group input {
+  width: 100%; padding: 8px 12px; background: #0a0a1a; border: 1px solid #0f3460;
+  border-radius: 6px; color: #e0e0e0; font-size: 13px; outline: none;
+}
+.modal-input-group input:focus { border-color: #e94560; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.modal-actions button {
+  padding: 8px 20px; border-radius: 6px; font-size: 13px; cursor: pointer;
+  border: 1px solid #0f3460; transition: all 0.15s;
+}
+.btn-cancel { background: transparent; color: #8892b0; }
+.btn-cancel:hover { border-color: #8892b0; color: #e0e0e0; }
+.btn-download { background: #e94560; color: #fff; border-color: #e94560; font-weight: 600; }
+.btn-download:hover { background: #d63651; }
+
+/* ========== 操作提示 ========== */
+.tips {
+  padding: 8px 10px; font-size: 10px; color: #555a77; line-height: 1.6;
+  border-top: 1px solid #0f3460;
+}
+.tips kbd {
+  display: inline-block; padding: 1px 4px; background: #0f3460;
+  border-radius: 3px; font-size: 9px; color: #8892b0; font-family: inherit;
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- 左侧工具栏 -->
+  <div class="sidebar">
+    <!-- 上传区 -->
+    <div class="sidebar-section">
+      <h3>📁 图片上传</h3>
+      <div class="upload-area" id="uploadArea">
+        <div class="icon">🖼️</div>
+        <div class="text">点击或拖拽上传图片<br><strong>PNG / JPG</strong></div>
+      </div>
+      <input type="file" id="fileInput" accept="image/png,image/jpeg">
+    </div>
+
+    <!-- 网格设置 -->
+    <div class="sidebar-section">
+      <h3>🔲 网格尺寸</h3>
+      <div class="grid-options" id="gridOptions">
+        <button class="grid-btn" data-size="8">8×8</button>
+        <button class="grid-btn" data-size="16">16×16</button>
+        <button class="grid-btn active" data-size="32">32×32</button>
+        <button class="grid-btn" data-size="64">64×64</button>
+      </div>
+    </div>
+
+    <!-- 工具模式 -->
+    <div class="sidebar-section">
+      <h3>🛠️ 工具模式</h3>
+      <div class="tool-buttons">
+        <button class="tool-btn active" id="brushTool" data-tool="brush">
+          <span class="icon">🖌️</span>
+          <span class="label">涂抹 (B)</span>
+        </button>
+        <button class="tool-btn" id="rectTool" data-tool="rect">
+          <span class="icon">⬜</span>
+          <span class="label">矩形 (R)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="sidebar-section">
+      <h3>⚡ 操作</h3>
+      <div class="action-buttons">
+        <button class="action-btn" id="undoBtn">↩️ 撤销 <span class="shortcut">Ctrl+Z</span></button>
+        <button class="action-btn" id="clearBtn">🗑️ 清空选择</button>
+        <button class="action-btn" id="selectAllBtn">✅ 全选</button>
+      </div>
+    </div>
+
+    <!-- 缩放 -->
+    <div class="sidebar-section">
+      <h3>🔍 缩放</h3>
+      <div class="zoom-controls">
+        <button class="zoom-btn" id="zoomFitBtn">适应</button>
+        <span class="zoom-display" id="zoomDisplay">100%</span>
+        <button class="zoom-btn" id="zoom100Btn">100%</button>
+      </div>
+    </div>
+
+    <!-- 导出 -->
+    <div class="sidebar-section">
+      <h3>💾 导出</h3>
+      <button class="export-btn" id="exportBtn" disabled>导出选中区域</button>
+    </div>
+
+    <!-- 操作提示 -->
+    <div class="tips">
+      <kbd>左键</kbd> 涂抹选择 &nbsp; <kbd>右键</kbd> 擦除<br>
+      <kbd>空格</kbd>+拖拽 平移 &nbsp; <kbd>滚轮</kbd> 缩放<br>
+      <kbd>B</kbd> 涂抹模式 &nbsp; <kbd>R</kbd> 矩形模式<br>
+      <kbd>Ctrl+Z</kbd> 撤销 &nbsp; <kbd>Shift</kbd>+矩形 追加选区<br>
+      <kbd>Esc</kbd> 关闭弹窗
+    </div>
+  </div>
+
+  <!-- 中间画布区域 -->
+  <div class="canvas-container mode-brush" id="canvasContainer">
+    <div class="canvas-wrapper" id="canvasWrapper">
+      <canvas id="canvasBase"></canvas>
+      <canvas id="canvasGrid"></canvas>
+      <canvas id="canvasOverlay"></canvas>
+    </div>
+    <div class="welcome-overlay" id="welcomeOverlay">
+      <div class="icon">🖼️</div>
+      <div class="title">请上传一张图片开始切割</div>
+      <div class="desc">支持 PNG / JPG 格式，可拖拽到此区域</div>
+    </div>
+  </div>
+</div>
+
+<!-- 底部状态栏 -->
+<div class="status-bar" id="statusBar">
+  <div class="status-item"><span class="label">像素:</span> <span class="value" id="statusPixel">-</span></div>
+  <div class="status-item"><span class="label">网格:</span> <span class="value" id="statusGrid">-</span></div>
+  <div class="status-item"><span class="label">选区:</span> <span class="value" id="statusSelection">0 格</span></div>
+  <div class="status-item"><span class="label">包围盒:</span> <span class="value" id="statusBBox">-</span></div>
+  <div class="status-item"><span class="label">缩放:</span> <span class="value" id="statusZoom">100%</span></div>
+  <div class="status-item"><span class="label">图片:</span> <span class="value" id="statusImage">未加载</span></div>
+</div>
+
+<!-- 导出预览弹窗 -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2>📦 导出预览</h2>
+    <div class="modal-preview" id="modalPreview"></div>
+    <div class="modal-info" id="modalInfo"></div>
+    <div class="modal-input-group">
+      <label>文件名</label>
+      <input type="text" id="exportFilename" value="building_crop_1.png">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="modalCancelBtn">取消</button>
+      <button class="btn-download" id="modalDownloadBtn">⬇️ 下载 PNG</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== 应用状态 ==========
+const state = {
+  // 图片
+  image: null,
+  imageWidth: 0,
+  imageHeight: 0,
+
+  // 视图
+  zoom: 1,
+  panX: 0,
+  panY: 0,
+
+  // 网格
+  gridSize: 32,
+  gridCols: 0,
+  gridRows: 0,
+
+  // 选区
+  selected: new Set(),
+  undoStack: [],
+  maxUndo: 50,
+
+  // 工具
+  tool: 'brush', // 'brush' | 'rect'
+  isPainting: false,
+  isErasing: false,
+  isPanning: false,
+  spaceDown: false,
+
+  // 涂抹追踪
+  lastGridPos: null,
+  paintedThisStroke: new Set(),
+
+  // 矩形选择
+  rectStart: null,
+  rectEnd: null,
+
+  // 导出
+  exportCount: 1,
+  exportBlob: null,
+};
+
+// ========== DOM 引用 ==========
+const $ = id => document.getElementById(id);
+const canvasContainer = $('canvasContainer');
+const canvasWrapper = $('canvasWrapper');
+const canvasBase = $('canvasBase');
+const canvasGrid = $('canvasGrid');
+const canvasOverlay = $('canvasOverlay');
+const ctxBase = canvasBase.getContext('2d');
+const ctxGrid = canvasGrid.getContext('2d');
+const ctxOverlay = canvasOverlay.getContext('2d');
+
+// ========== 工具函数 ==========
+function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
+
+// 屏幕坐标 → 图片像素坐标
+function screenToImage(sx, sy) {
+  const rect = canvasContainer.getBoundingClientRect();
+  const x = (sx - rect.left - state.panX) / state.zoom;
+  const y = (sy - rect.top - state.panY) / state.zoom;
+  return { x, y };
+}
+
+// 图片像素坐标 → 网格坐标
+function imageToGrid(ix, iy) {
+  const col = Math.floor(ix / state.gridSize);
+  const row = Math.floor(iy / state.gridSize);
+  return { col, row };
+}
+
+// 屏幕坐标 → 网格坐标
+function screenToGrid(sx, sy) {
+  const { x, y } = screenToImage(sx, sy);
+  return imageToGrid(x, y);
+}
+
+// 网格坐标是否有效
+function isValidGrid(col, row) {
+  return col >= 0 && col < state.gridCols && row >= 0 && row < state.gridRows;
+}
+
+// 网格key
+function gridKey(col, row) { return `${col},${row}`; }
+
+// Bresenham 线算法
+function bresenhamLine(x0, y0, x1, y1) {
+  const points = [];
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  while (true) {
+    points.push({ col: x0, row: y0 });
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx) { err += dx; y0 += sy; }
+  }
+  return points;
+}
+
+// ========== 图片上传 ==========
+function setupUpload() {
+  const uploadArea = $('uploadArea');
+  const fileInput = $('fileInput');
+
+  uploadArea.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', e => {
+    if (e.target.files.length > 0) loadImage(e.target.files[0]);
+  });
+
+  // 拖拽上传（工具栏上传区域）
+  uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
+  uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
+  uploadArea.addEventListener('drop', e => {
+    e.preventDefault(); uploadArea.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) loadImage(e.dataTransfer.files[0]);
+  });
+
+  // 拖拽上传（画布区域）
+  canvasContainer.addEventListener('dragover', e => { e.preventDefault(); });
+  canvasContainer.addEventListener('drop', e => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length > 0) loadImage(e.dataTransfer.files[0]);
+  });
+}
+
+function loadImage(file) {
+  if (!file.type.match(/^image\/(png|jpeg)$/)) {
+    alert('请上传 PNG 或 JPG 格式的图片');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      state.image = img;
+      state.imageWidth = img.width;
+      state.imageHeight = img.height;
+      state.selected.clear();
+      state.undoStack = [];
+
+      updateGridDimensions();
+      initCanvases();
+      zoomToFit();
+      renderAll();
+
+      $('welcomeOverlay').classList.add('hidden');
+      $('exportBtn').disabled = false;
+      $('statusImage').textContent = `${img.width}×${img.height}`;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ========== Canvas 初始化 ==========
+function initCanvases() {
+  const w = state.imageWidth;
+  const h = state.imageHeight;
+  [canvasBase, canvasGrid, canvasOverlay].forEach(c => {
+    c.width = w;
+    c.height = h;
+    c.style.width = w + 'px';
+    c.style.height = h + 'px';
+  });
+  canvasWrapper.style.width = w + 'px';
+  canvasWrapper.style.height = h + 'px';
+
+  // 绘制原图
+  ctxBase.clearRect(0, 0, w, h);
+  ctxBase.drawImage(state.image, 0, 0);
+}
+
+// ========== 网格系统 ==========
+function updateGridDimensions() {
+  state.gridCols = Math.ceil(state.imageWidth / state.gridSize);
+  state.gridRows = Math.ceil(state.imageHeight / state.gridSize);
+}
+
+function renderGrid() {
+  if (!state.image) return;
+  const w = state.imageWidth, h = state.imageHeight;
+  const gs = state.gridSize;
+  ctxGrid.clearRect(0, 0, w, h);
+
+  // 缩放后网格在屏幕上的像素大小
+  const screenGridSize = gs * state.zoom;
+  if (screenGridSize < 4) return; // 太小不绘制网格线
+
+  ctxGrid.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctxGrid.lineWidth = 1;
+  ctxGrid.beginPath();
+
+  // 竖线
+  for (let x = 0; x <= w; x += gs) {
+    ctxGrid.moveTo(x + 0.5, 0);
+    ctxGrid.lineTo(x + 0.5, h);
+  }
+  // 横线
+  for (let y = 0; y <= h; y += gs) {
+    ctxGrid.moveTo(0, y + 0.5);
+    ctxGrid.lineTo(w, y + 0.5);
+  }
+  ctxGrid.stroke();
+}
+
+// ========== 选区渲染 ==========
+function renderOverlay() {
+  if (!state.image) return;
+  const w = state.imageWidth, h = state.imageHeight;
+  const gs = state.gridSize;
+  ctxOverlay.clearRect(0, 0, w, h);
+
+  // 绘制选中的方块
+  ctxOverlay.fillStyle = 'rgba(233, 69, 96, 0.3)';
+  ctxOverlay.strokeStyle = 'rgba(233, 69, 96, 0.6)';
+  ctxOverlay.lineWidth = 1;
+  for (const key of state.selected) {
+    const [col, row] = key.split(',').map(Number);
+    const x = col * gs, y = row * gs;
+    const cw = Math.min(gs, w - x), ch = Math.min(gs, h - y);
+    ctxOverlay.fillRect(x, y, cw, ch);
+    ctxOverlay.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+  }
+
+  // 矩形选择预览
+  if (state.tool === 'rect' && state.rectStart && state.rectEnd) {
+    const x1 = Math.min(state.rectStart.col, state.rectEnd.col);
+    const y1 = Math.min(state.rectStart.row, state.rectEnd.row);
+    const x2 = Math.max(state.rectStart.col, state.rectEnd.col);
+    const y2 = Math.max(state.rectStart.row, state.rectEnd.row);
+
+    ctxOverlay.setLineDash([4, 4]);
+    ctxOverlay.strokeStyle = 'rgba(100, 200, 255, 0.8)';
+    ctxOverlay.lineWidth = 2;
+    const rx = x1 * gs, ry = y1 * gs;
+    const rw = (x2 - x1 + 1) * gs, rh = (y2 - y1 + 1) * gs;
+    ctxOverlay.strokeRect(rx, ry, rw, rh);
+    ctxOverlay.setLineDash([]);
+
+    // 尺寸标注
+    ctxOverlay.fillStyle = 'rgba(100, 200, 255, 0.9)';
+    ctxOverlay.font = `${Math.max(12, 14 / state.zoom)}px sans-serif`;
+    const labelText = `${rw}×${rh} px`;
+    ctxOverlay.fillText(labelText, rx + 4, ry - 6 / state.zoom);
+  }
+
+  updateSelectionStatus();
+}
+
+// 仅重绘变化的网格方块（脏区域）
+function renderDirtyCells(cells) {
+  if (!state.image) return;
+  const gs = state.gridSize;
+  const w = state.imageWidth, h = state.imageHeight;
+  for (const { col, row } of cells) {
+    const x = col * gs, y = row * gs;
+    const cw = Math.min(gs, w - x), ch = Math.min(gs, h - y);
+    ctxOverlay.clearRect(x, y, cw, ch);
+    if (state.selected.has(gridKey(col, row))) {
+      ctxOverlay.fillStyle = 'rgba(233, 69, 96, 0.3)';
+      ctxOverlay.fillRect(x, y, cw, ch);
+      ctxOverlay.strokeStyle = 'rgba(233, 69, 96, 0.6)';
+      ctxOverlay.lineWidth = 1;
+      ctxOverlay.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+    }
+  }
+}
+
+// ========== 视图变换 ==========
+function applyTransform() {
+  canvasWrapper.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+  $('zoomDisplay').textContent = Math.round(state.zoom * 100) + '%';
+  $('statusZoom').textContent = Math.round(state.zoom * 100) + '%';
+}
+
+function zoomToFit() {
+  if (!state.image) return;
+  const rect = canvasContainer.getBoundingClientRect();
+  const scaleX = (rect.width - 40) / state.imageWidth;
+  const scaleY = (rect.height - 40) / state.imageHeight;
+  state.zoom = Math.min(scaleX, scaleY, 1);
+  state.panX = (rect.width - state.imageWidth * state.zoom) / 2;
+  state.panY = (rect.height - state.imageHeight * state.zoom) / 2;
+  applyTransform();
+  renderGrid();
+}
+
+function zoomTo100() {
+  if (!state.image) return;
+  const rect = canvasContainer.getBoundingClientRect();
+  state.zoom = 1;
+  state.panX = (rect.width - state.imageWidth) / 2;
+  state.panY = (rect.height - state.imageHeight) / 2;
+  applyTransform();
+  renderGrid();
+}
+
+function zoomAt(cx, cy, delta) {
+  const oldZoom = state.zoom;
+  const factor = delta > 0 ? 0.9 : 1.1;
+  state.zoom = clamp(state.zoom * factor, 0.05, 20);
+
+  // 以鼠标位置为中心缩放
+  const rect = canvasContainer.getBoundingClientRect();
+  const mx = cx - rect.left;
+  const my = cy - rect.top;
+  state.panX = mx - (mx - state.panX) * (state.zoom / oldZoom);
+  state.panY = my - (my - state.panY) * (state.zoom / oldZoom);
+
+  applyTransform();
+  renderGrid();
+}
+
+// ========== 渲染全部 ==========
+function renderAll() {
+  renderGrid();
+  renderOverlay();
+  applyTransform();
+}
+
+// ========== 选区状态更新 ==========
+function updateSelectionStatus() {
+  const count = state.selected.size;
+  $('statusSelection').textContent = count + ' 格';
+
+  if (count === 0) {
+    $('statusBBox').textContent = '-';
+    return;
+  }
+
+  let minC = Infinity, maxC = -Infinity, minR = Infinity, maxR = -Infinity;
+  for (const key of state.selected) {
+    const [c, r] = key.split(',').map(Number);
+    if (c < minC) minC = c; if (c > maxC) maxC = c;
+    if (r < minR) minR = r; if (r > maxR) maxR = r;
+  }
+  const bw = (maxC - minC + 1) * state.gridSize;
+  const bh = (maxR - minR + 1) * state.gridSize;
+  $('statusBBox').textContent = `${bw}×${bh} px`;
+}
+
+// ========== 撤销系统 ==========
+function pushUndo() {
+  state.undoStack.push(new Set(state.selected));
+  if (state.undoStack.length > state.maxUndo) state.undoStack.shift();
+}
+
+function undo() {
+  if (state.undoStack.length === 0) return;
+  state.selected = state.undoStack.pop();
+  renderOverlay();
+}
+
+// ========== 涂抹模式交互 ==========
+function setupBrushInteraction() {
+  let animFrameId = null;
+  let dirtyCells = [];
+
+  function flushDirty() {
+    if (dirtyCells.length > 0) {
+      renderDirtyCells(dirtyCells);
+      dirtyCells = [];
+    }
+    animFrameId = null;
+  }
+
+  function scheduleDirtyRender(cells) {
+    dirtyCells.push(...cells);
+    if (!animFrameId) {
+      animFrameId = requestAnimationFrame(flushDirty);
+    }
+  }
+
+  function paintCell(col, row, erase) {
+    if (!isValidGrid(col, row)) return false;
+    const key = gridKey(col, row);
+    if (erase) {
+      if (state.selected.has(key)) {
+        state.selected.delete(key);
+        scheduleDirtyRender([{ col, row }]);
+        return true;
+      }
+    } else {
+      if (!state.selected.has(key)) {
+        state.selected.add(key);
+        scheduleDirtyRender([{ col, row }]);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  canvasContainer.addEventListener('mousedown', e => {
+    if (!state.image) return;
+    if (state.spaceDown || e.button === 1) {
+      // 平移
+      state.isPanning = true;
+      state._panStartX = e.clientX - state.panX;
+      state._panStartY = e.clientY - state.panY;
+      canvasContainer.classList.add('mode-panning');
+      e.preventDefault();
+      return;
+    }
+
+    if (state.tool === 'brush') {
+      const erase = e.button === 2;
+      state.isPainting = true;
+      state.isErasing = erase;
+      if (erase) canvasContainer.classList.add('mode-erasing');
+
+      pushUndo();
+
+      const { col, row } = screenToGrid(e.clientX, e.clientY);
+      state.lastGridPos = { col, row };
+      state.paintedThisStroke = new Set();
+      paintCell(col, row, erase);
+      state.paintedThisStroke.add(gridKey(col, row));
+      updateSelectionStatus();
+    } else if (state.tool === 'rect') {
+      if (e.button !== 0) return;
+      const { col, row } = screenToGrid(e.clientX, e.clientY);
+      if (!isValidGrid(col, row)) return;
+      state.rectStart = { col, row };
+      state.rectEnd = { col, row };
+      state.isPainting = true;
+    }
+  });
+
+  canvasContainer.addEventListener('mousemove', e => {
+    if (!state.image) return;
+
+    // 更新状态栏坐标
+    const { x, y } = screenToImage(e.clientX, e.clientY);
+    const { col, row } = imageToGrid(x, y);
+    $('statusPixel').textContent = `${Math.floor(x)}, ${Math.floor(y)}`;
+    $('statusGrid').textContent = isValidGrid(col, row) ? `${col}, ${row}` : '-';
+
+    // 平移
+    if (state.isPanning) {
+      state.panX = e.clientX - state._panStartX;
+      state.panY = e.clientY - state._panStartY;
+      applyTransform();
+      return;
+    }
+
+    // 涂抹模式拖拽
+    if (state.tool === 'brush' && state.isPainting) {
+      const curr = screenToGrid(e.clientX, e.clientY);
+      if (state.lastGridPos) {
+        const points = bresenhamLine(state.lastGridPos.col, state.lastGridPos.row, curr.col, curr.row);
+        for (const p of points) {
+          const pk = gridKey(p.col, p.row);
+          if (!state.paintedThisStroke.has(pk)) {
+            paintCell(p.col, p.row, state.isErasing);
+            state.paintedThisStroke.add(pk);
+          }
+        }
+      }
+      state.lastGridPos = curr;
+      updateSelectionStatus();
+    }
+
+    // 矩形模式拖拽
+    if (state.tool === 'rect' && state.isPainting && state.rectStart) {
+      const curr = screenToGrid(e.clientX, e.clientY);
+      state.rectEnd = {
+        col: clamp(curr.col, 0, state.gridCols - 1),
+        row: clamp(curr.row, 0, state.gridRows - 1)
+      };
+      renderOverlay();
+    }
+  });
+
+  function endPaint(e) {
+    if (state.isPanning) {
+      state.isPanning = false;
+      canvasContainer.classList.remove('mode-panning');
+      updateCursorClass();
+      return;
+    }
+
+    if (state.tool === 'brush' && state.isPainting) {
+      state.isPainting = false;
+      state.isErasing = false;
+      state.lastGridPos = null;
+      canvasContainer.classList.remove('mode-erasing');
+      updateCursorClass();
+      // 如果没有实际变化，弹出撤销栈
+      if (state.undoStack.length > 0) {
+        const prev = state.undoStack[state.undoStack.length - 1];
+        if (prev.size === state.selected.size) {
+          let same = true;
+          for (const k of prev) { if (!state.selected.has(k)) { same = false; break; } }
+          if (same) state.undoStack.pop();
+        }
+      }
+      renderOverlay();
+    }
+
+    if (state.tool === 'rect' && state.isPainting && state.rectStart && state.rectEnd) {
+      state.isPainting = false;
+      const shift = e.shiftKey;
+      if (!shift) pushUndo();
+      else pushUndo();
+
+      const c1 = Math.min(state.rectStart.col, state.rectEnd.col);
+      const r1 = Math.min(state.rectStart.row, state.rectEnd.row);
+      const c2 = Math.max(state.rectStart.col, state.rectEnd.col);
+      const r2 = Math.max(state.rectStart.row, state.rectEnd.row);
+
+      if (!shift) state.selected.clear();
+
+      for (let c = c1; c <= c2; c++) {
+        for (let r = r1; r <= r2; r++) {
+          if (isValidGrid(c, r)) state.selected.add(gridKey(c, r));
+        }
+      }
+
+      state.rectStart = null;
+      state.rectEnd = null;
+      renderOverlay();
+    }
+  }
+
+  window.addEventListener('mouseup', endPaint);
+
+  // 滚轮缩放
+  canvasContainer.addEventListener('wheel', e => {
+    e.preventDefault();
+    zoomAt(e.clientX, e.clientY, e.deltaY);
+  }, { passive: false });
+
+  // 禁止右键菜单
+  canvasContainer.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+// ========== 工具模式切换 ==========
+function updateCursorClass() {
+  canvasContainer.classList.remove('mode-brush', 'mode-rect', 'mode-erasing', 'mode-panning');
+  if (state.spaceDown) {
+    canvasContainer.classList.add('mode-panning');
+  } else if (state.tool === 'brush') {
+    canvasContainer.classList.add('mode-brush');
+  } else if (state.tool === 'rect') {
+    canvasContainer.classList.add('mode-rect');
+  }
+}
+
+function setTool(tool) {
+  state.tool = tool;
+  document.querySelectorAll('.tool-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tool === tool);
+  });
+  updateCursorClass();
+}
+
+// ========== 网格尺寸切换 ==========
+function setGridSize(size) {
+  // 将已选区域的像素范围映射到新网格
+  const oldGs = state.gridSize;
+  const newGs = size;
+
+  if (state.selected.size > 0 && oldGs !== newGs) {
+    // 收集选中的像素范围
+    const pixels = new Set();
+    for (const key of state.selected) {
+      const [col, row] = key.split(',').map(Number);
+      for (let dx = 0; dx < oldGs; dx++) {
+        for (let dy = 0; dy < oldGs; dy++) {
+          pixels.add(`${col * oldGs + dx},${row * oldGs + dy}`);
+        }
+      }
+    }
+    // 按新网格重新映射
+    const newSelected = new Set();
+    for (const pk of pixels) {
+      const [px, py] = pk.split(',').map(Number);
+      const nc = Math.floor(px / newGs);
+      const nr = Math.floor(py / newGs);
+      newSelected.add(gridKey(nc, nr));
+    }
+    state.selected = newSelected;
+  }
+
+  state.gridSize = newGs;
+  updateGridDimensions();
+
+  document.querySelectorAll('.grid-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.size) === newGs);
+  });
+
+  if (state.image) renderAll();
+}
+
+// ========== 导出功能 ==========
+function doExport() {
+  if (!state.image || state.selected.size === 0) {
+    alert('请先选择要导出的区域');
+    return;
+  }
+
+  const gs = state.gridSize;
+  let minC = Infinity, maxC = -Infinity, minR = Infinity, maxR = -Infinity;
+  for (const key of state.selected) {
+    const [c, r] = key.split(',').map(Number);
+    if (c < minC) minC = c; if (c > maxC) maxC = c;
+    if (r < minR) minR = r; if (r > maxR) maxR = r;
+  }
+
+  const sx = minC * gs, sy = minR * gs;
+  const sw = Math.min((maxC - minC + 1) * gs, state.imageWidth - sx);
+  const sh = Math.min((maxR - minR + 1) * gs, state.imageHeight - sy);
+
+  // 创建离屏 Canvas
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = sw;
+  offCanvas.height = sh;
+  const offCtx = offCanvas.getContext('2d');
+
+  // 从原图复制像素
+  offCtx.drawImage(state.image, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  // 将未选中的网格方块设为透明
+  const imageData = offCtx.getImageData(0, 0, sw, sh);
+  const data = imageData.data;
+
+  for (let r = minR; r <= maxR; r++) {
+    for (let c = minC; c <= maxC; c++) {
+      if (!state.selected.has(gridKey(c, r))) {
+        // 清除这个网格方块的像素
+        const bx = (c - minC) * gs;
+        const by = (r - minR) * gs;
+        const bw = Math.min(gs, sw - bx);
+        const bh = Math.min(gs, sh - by);
+        for (let dy = 0; dy < bh; dy++) {
+          for (let dx = 0; dx < bw; dx++) {
+            const idx = ((by + dy) * sw + (bx + dx)) * 4;
+            data[idx + 3] = 0; // alpha = 0
+          }
+        }
+      }
+    }
+  }
+
+  offCtx.putImageData(imageData, 0, 0);
+
+  // 生成预览
+  offCanvas.toBlob(blob => {
+    state.exportBlob = blob;
+    const url = URL.createObjectURL(blob);
+
+    const preview = $('modalPreview');
+    preview.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = url;
+    preview.appendChild(img);
+
+    $('modalInfo').textContent = `尺寸: ${sw}×${sh} 像素 | 已选: ${state.selected.size} 格 | 文件大小: ${(blob.size / 1024).toFixed(1)} KB`;
+    $('exportFilename').value = `building_crop_${state.exportCount}.png`;
+    $('modalOverlay').classList.add('visible');
+  }, 'image/png');
+}
+
+function downloadExport() {
+  if (!state.exportBlob) return;
+  const filename = $('exportFilename').value || `building_crop_${state.exportCount}.png`;
+  const url = URL.createObjectURL(state.exportBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  state.exportCount++;
+  closeModal();
+}
+
+function closeModal() {
+  $('modalOverlay').classList.remove('visible');
+  state.exportBlob = null;
+}
+
+// ========== 键盘快捷键 ==========
+function setupKeyboard() {
+  window.addEventListener('keydown', e => {
+    // Ctrl+Z 撤销
+    if (e.ctrlKey && e.key === 'z') {
+      e.preventDefault();
+      undo();
+      return;
+    }
+
+    // 空格：平移模式
+    if (e.code === 'Space' && !e.repeat) {
+      e.preventDefault();
+      state.spaceDown = true;
+      updateCursorClass();
+      return;
+    }
+
+    // B：涂抹模式
+    if (e.key === 'b' || e.key === 'B') {
+      if (!e.ctrlKey && !e.altKey) setTool('brush');
+      return;
+    }
+
+    // R：矩形模式
+    if (e.key === 'r' || e.key === 'R') {
+      if (!e.ctrlKey && !e.altKey) setTool('rect');
+      return;
+    }
+
+    // Esc：关闭弹窗
+    if (e.key === 'Escape') {
+      closeModal();
+      return;
+    }
+  });
+
+  window.addEventListener('keyup', e => {
+    if (e.code === 'Space') {
+      state.spaceDown = false;
+      updateCursorClass();
+    }
+  });
+}
+
+// ========== 按钮事件绑定 ==========
+function setupButtons() {
+  // 网格尺寸
+  document.querySelectorAll('.grid-btn').forEach(btn => {
+    btn.addEventListener('click', () => setGridSize(parseInt(btn.dataset.size)));
+  });
+
+  // 工具模式
+  $('brushTool').addEventListener('click', () => setTool('brush'));
+  $('rectTool').addEventListener('click', () => setTool('rect'));
+
+  // 操作按钮
+  $('undoBtn').addEventListener('click', undo);
+  $('clearBtn').addEventListener('click', () => {
+    if (state.selected.size > 0) {
+      pushUndo();
+      state.selected.clear();
+      renderOverlay();
+    }
+  });
+  $('selectAllBtn').addEventListener('click', () => {
+    if (!state.image) return;
+    pushUndo();
+    state.selected.clear();
+    for (let c = 0; c < state.gridCols; c++) {
+      for (let r = 0; r < state.gridRows; r++) {
+        state.selected.add(gridKey(c, r));
+      }
+    }
+    renderOverlay();
+  });
+
+  // 缩放
+  $('zoomFitBtn').addEventListener('click', zoomToFit);
+  $('zoom100Btn').addEventListener('click', zoomTo100);
+
+  // 导出
+  $('exportBtn').addEventListener('click', doExport);
+  $('modalCancelBtn').addEventListener('click', closeModal);
+  $('modalDownloadBtn').addEventListener('click', downloadExport);
+
+  // 点击遮罩关闭弹窗
+  $('modalOverlay').addEventListener('click', e => {
+    if (e.target === $('modalOverlay')) closeModal();
+  });
+}
+
+// ========== 悬停高亮 ==========
+let hoverCell = null;
+function setupHoverHighlight() {
+  canvasContainer.addEventListener('mousemove', e => {
+    if (!state.image || state.isPainting || state.isPanning) return;
+    const { col, row } = screenToGrid(e.clientX, e.clientY);
+    const key = gridKey(col, row);
+    if (hoverCell !== key) {
+      // 清除旧高亮
+      if (hoverCell) {
+        const [oc, or] = hoverCell.split(',').map(Number);
+        renderDirtyCells([{ col: oc, row: or }]);
+      }
+      hoverCell = isValidGrid(col, row) ? key : null;
+      // 绘制新高亮
+      if (hoverCell) {
+        const gs = state.gridSize;
+        const x = col * gs, y = row * gs;
+        const cw = Math.min(gs, state.imageWidth - x);
+        const ch = Math.min(gs, state.imageHeight - y);
+        // 先重绘该cell（处理已选中的情况）
+        renderDirtyCells([{ col, row }]);
+        // 再画高亮边框
+        ctxOverlay.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctxOverlay.lineWidth = 2;
+        ctxOverlay.strokeRect(x + 1, y + 1, cw - 2, ch - 2);
+      }
+    }
+  });
+
+  canvasContainer.addEventListener('mouseleave', () => {
+    if (hoverCell) {
+      const [oc, or] = hoverCell.split(',').map(Number);
+      renderDirtyCells([{ col: oc, row: or }]);
+      hoverCell = null;
+    }
+  });
+}
+
+// ========== 窗口resize ==========
+function setupResize() {
+  window.addEventListener('resize', () => {
+    if (state.image) {
+      // 不改变缩放，只更新状态栏位置已自动处理
+    }
+  });
+}
+
+// ========== 初始化 ==========
+function init() {
+  setupUpload();
+  setupBrushInteraction();
+  setupKeyboard();
+  setupButtons();
+  setupHoverHighlight();
+  setupResize();
+}
+
+init();
+</script>
+</body>
+</html>
