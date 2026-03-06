@@ -17,15 +17,18 @@ const FURNACE_CONFIG = {
     defaultCapacity: 5,          // 每座暖炉可容纳人数
     warmTemp: 15,                // 暖炉维持的室内温度（°C）
     cooldownMinutes: 30,         // 暖炉熄灭后降温时间（分钟）
+    relightMinWood: 3,            // 重新点燃需要的最低木柴量（防止刚补一点就点着又耗完）
+    relightCooldownSeconds: 300,  // 熄灭后至少冷却5分钟才能重新点燃（游戏内秒）
     bodyTempRecoveryRate: 0.2,   // 体温恢复速率（°C/分钟）= +0.00333/秒
     staminaRecoveryRate: 0.02,   // 体力恢复速率（/秒）【已调整：从0.05降为0.02】
     healthRecoveryRate: 0.008,    // 健康恢复速率（/秒）【已调整：从0.02降为0.008】
 
-    // 第二座暖炉修建
-    buildMaterialCost: 50,       // 建材消耗
-    buildWoodCost: 20,           // 木柴消耗
-    buildTimeSeconds: 7200,      // 修建需要游戏时间（2小时）
-    buildMinWorkers: 1,          // 最少需要人数【已调整：从3降为1，1人可建造但较慢】
+    // 第二座暖炉修复（Day3解锁，纯劳动，不消耗资源）
+    buildMaterialCost: 0,        // 不需要建材
+    buildWoodCost: 0,            // 不需要木柴
+    buildTimeSeconds: 7200,      // 修复需要2游戏小时劳动
+    buildMinWorkers: 1,          // 1人可修复但较慢
+    buildUnlockDay: 3,           // Day3解锁
 
     // 拥挤惩罚（8人共用1座暖炉时触发）
     crowdThreshold: 5,           // 超过此人数触发拥挤
@@ -143,14 +146,13 @@ class FurnaceSystem {
     _updateFurnace(furnace, dt) {
         const rs = this.game.resourceSystem;
 
-        // 检查运转条件：木柴>0 且 电力>0
+        // 检查运转条件：只需木柴>0（电力不再是暖炉运转的必要条件）
         if (furnace.active) {
-            if (rs && (rs.woodFuel <= 0 || rs.power <= 0)) {
+            if (rs && rs.woodFuel <= 0) {
                 furnace.active = false;
                 furnace._coolingTimer = FURNACE_CONFIG.cooldownMinutes * 60; // 转为秒
                 if (this.game.addEvent) {
-                    const reason = rs.woodFuel <= 0 ? '木柴耗尽' : '电力中断';
-                    this.game.addEvent(`🔥❌ ${furnace.name}因${reason}而熄灭！`);
+                    this.game.addEvent(`🔥❌ ${furnace.name}因木柴耗尽而熄灭！`);
                 }
                 console.log(`[FurnaceSystem] ${furnace.name} 熄灭`);
             }
@@ -171,13 +173,16 @@ class FurnaceSystem {
                 furnace.indoorTemp = ws ? ws.getEffectiveTemp() : 0;
             }
 
-            // 重新检查是否可以恢复运转
-            if (rs && rs.woodFuel > 0 && rs.power > 0) {
+            // 重新检查是否可以恢复运转（需要足够木柴 + 冷却时间已过）
+            const elapsedSinceDeath = (FURNACE_CONFIG.cooldownMinutes * 60) - furnace._coolingTimer;
+            const canRelight = rs && rs.woodFuel >= FURNACE_CONFIG.relightMinWood
+                && elapsedSinceDeath >= FURNACE_CONFIG.relightCooldownSeconds;
+            if (canRelight) {
                 furnace.active = true;
                 furnace._coolingTimer = 0;
                 furnace.indoorTemp = FURNACE_CONFIG.warmTemp;
                 if (this.game.addEvent) {
-                    this.game.addEvent(`🔥✅ ${furnace.name}重新点燃！`);
+                    this.game.addEvent(`🔥✅ ${furnace.name}重新点燃！（木柴储备: ${rs.woodFuel.toFixed(1)}）`);
                 }
             }
         } else {
@@ -237,12 +242,12 @@ class FurnaceSystem {
         }
     }
 
-    /** 检查是否满足第二暖炉建造条件 */
+    /** 检查是否满足第二暖炉修复条件（Day3解锁） */
     checkBuildCondition() {
         if (this.secondFurnaceBuilt || this.isBuildingSecondFurnace) return false;
-        const rs = this.game.resourceSystem;
-        if (!rs) return false;
-        return rs.material >= FURNACE_CONFIG.buildMaterialCost && rs.woodFuel >= FURNACE_CONFIG.buildWoodCost;
+        // Day3解锁
+        const day = this.game.dayCount || this.game.weatherSystem?.currentDay || 1;
+        return day >= FURNACE_CONFIG.buildUnlockDay;
     }
 
     /** 定期检查建造条件并通知 */
@@ -251,7 +256,7 @@ class FurnaceSystem {
         if (this.checkBuildCondition()) {
             this._buildConditionNotified = true;
             if (this.game.addEvent) {
-                this.game.addEvent(`📢 建材已足够（${Math.round(this.game.resourceSystem.material)}单位），可以开始修建第二暖炉！`);
+                this.game.addEvent(`📢 第3天到了！可以开始修复第二暖炉！派2人去工坊劳动约2小时即可！`);
             }
         }
     }
@@ -261,40 +266,28 @@ class FurnaceSystem {
     /** 开始修建第二座暖炉（由TaskSystem调用） */
     startBuildSecondFurnace(workerIds) {
         if (this.secondFurnaceBuilt) {
-            console.log('[FurnaceSystem] 第二座暖炉已建成，无需重复修建');
+            console.log('[FurnaceSystem] 第二座暖炉已建成，无需重复修复');
             return false;
         }
 
-        const rs = this.game.resourceSystem;
-        if (!rs) return false;
-
-        // 检查材料
-        if (rs.material < FURNACE_CONFIG.buildMaterialCost) {
+        // 检查Day3解锁
+        if (!this.checkBuildCondition()) {
             if (this.game.addEvent) {
-                this.game.addEvent(`⚠️ 建材不足！修建第二暖炉需要${FURNACE_CONFIG.buildMaterialCost}单位建材，当前仅${Math.round(rs.material)}单位`);
-            }
-            return false;
-        }
-        if (rs.woodFuel < FURNACE_CONFIG.buildWoodCost) {
-            if (this.game.addEvent) {
-                this.game.addEvent(`⚠️ 木柴不足！修建第二暖炉需要${FURNACE_CONFIG.buildWoodCost}单位木柴，当前仅${Math.round(rs.woodFuel)}单位`);
+                this.game.addEvent(`⚠️ 第二暖炉尚未解锁！需要等到第3天才能修复`);
             }
             return false;
         }
 
-        // 消耗材料
-        rs.consumeResource('material', FURNACE_CONFIG.buildMaterialCost, '修建第二暖炉');
-        rs.consumeResource('woodFuel', FURNACE_CONFIG.buildWoodCost, '修建第二暖炉');
-
+        // 不消耗资源，纯劳动
         this.isBuildingSecondFurnace = true;
         this.buildProgress = 0;
         this.buildWorkers = workerIds || [];
 
         if (this.game.addEvent) {
-            this.game.addEvent(`🏗️ 开始修建第二座暖炉（公寓楼）！预计需要2小时，${this.buildWorkers.length}人参与施工`);
+            this.game.addEvent(`🏗️ 开始修复第二座暖炉！预计需要2小时劳动，${this.buildWorkers.length}人参与施工`);
         }
 
-        console.log('[FurnaceSystem] 开始修建第二暖炉，工人:', this.buildWorkers);
+        console.log('[FurnaceSystem] 开始修复第二暖炉，工人:', this.buildWorkers);
         return true;
     }
 

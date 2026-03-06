@@ -17,7 +17,7 @@ const TASK_TYPES = {
     COLLECT_WOOD:     'COLLECT_WOOD',      // 收集木柴
     COLLECT_FOOD:     'COLLECT_FOOD',      // 收集食物
     MAINTAIN_POWER:   'MAINTAIN_POWER',    // 维护电力
-    COLLECT_MATERIAL: 'COLLECT_MATERIAL',  // 收集建材
+    COLLECT_MATERIAL: 'COLLECT_MATERIAL',  // 探索废墟
     PREPARE_WARMTH:   'PREPARE_WARMTH',    // 准备御寒物资
     PREPARE_MEDICAL:  'PREPARE_MEDICAL',   // 准备医疗物资
     BOOST_MORALE:     'BOOST_MORALE',      // 鼓舞士气
@@ -29,7 +29,7 @@ const TASK_TYPES = {
     REST_RECOVER:     'REST_RECOVER',      // 休息恢复
     // ---- 新增特殊角色任务 ----
     SCOUT_RUINS:      'SCOUT_RUINS',       // 废墟侦察（歆玥）
-    CRAFT_MEDICINE:   'CRAFT_MEDICINE',    // 草药制剂（清璇）
+    // CRAFT_MEDICINE已合并到PREPARE_MEDICAL
     SET_TRAP:         'SET_TRAP',          // 布置陷阱（清璇）
     REPAIR_RADIO:     'REPAIR_RADIO',      // 修理无线电（清璇）
 };
@@ -67,14 +67,14 @@ const TASK_DETAILS = {
         resourceType: 'power',
     },
     [TASK_TYPES.COLLECT_MATERIAL]: {
-        name: '🧱 收集建材',
-        desc: '前往废墟采集场收集木材、金属、砖石等建筑材料',
+        name: '🔍 探索废墟',
+        desc: '前往废墟探索，可能发现食物、药品、零件等物资（每天限3次）',
         isOutdoor: true,
-        baseYield: 8,
-        baseDuration: 2400,
+        baseYield: 1,
+        baseDuration: 3600,
         staminaCost: 18,
         targetLocation: 'ruins_site',
-        resourceType: 'material',
+        resourceType: 'explore',
     },
     [TASK_TYPES.PREPARE_WARMTH]: {
         name: '🧥 准备御寒物资',
@@ -87,8 +87,8 @@ const TASK_DETAILS = {
         resourceType: null,
     },
     [TASK_TYPES.PREPARE_MEDICAL]: {
-        name: '💊 准备医疗物资',
-        desc: '在医疗站整理医疗物资，准备急救药品',
+        name: '💊 医疗救治',
+        desc: '在医疗站治疗伤患、制作急救包',
         isOutdoor: false,
         baseYield: 0,
         baseDuration: 1800,
@@ -177,16 +177,7 @@ const TASK_DETAILS = {
         targetLocation: 'ruins_site',
         resourceType: null, // 特殊产出在_applyTaskEffect中处理
     },
-    [TASK_TYPES.CRAFT_MEDICINE]: {
-        name: '🌿 草药制剂',
-        desc: '清璇在医疗站用采集的草药制作急救包和药品',
-        isOutdoor: false,
-        baseYield: 0,
-        baseDuration: 1800,
-        staminaCost: 5,
-        targetLocation: 'medical_door',
-        resourceType: null,
-    },
+
     [TASK_TYPES.SET_TRAP]: {
         name: '⚠️ 布置陷阱',
         desc: '清璇在围墙外布置警报陷阱装置',
@@ -223,7 +214,7 @@ const NPC_SPECIALTIES = {
     },
     'lu_chen': {
         name: '采集/建造专长',
-        desc: '建材×1.5、食物×1.3、建造×1.3、耐寒体温下降×0.7',
+        desc: '采集×1.3、食物采集×1.3、建造×1.3、耐寒体温下降×0.7',
         bonuses: {
             [TASK_TYPES.COLLECT_MATERIAL]: 1.5,
             [TASK_TYPES.COLLECT_FOOD]: 1.3,
@@ -282,12 +273,11 @@ const NPC_SPECIALTIES = {
     },
     'qing_xuan': {
         name: '药剂/陷阱/无线电专长',
-        desc: '草药制剂×1.5、陷阱装置、无线电修理、学习他人技能×0.7',
+        desc: '医疗救治×1.5、陷阱装置、无线电修理、学习他人技能×0.7',
         bonuses: {
-            [TASK_TYPES.CRAFT_MEDICINE]: 1.5,
+            [TASK_TYPES.PREPARE_MEDICAL]: 1.5,
             [TASK_TYPES.SET_TRAP]: 1.5,
             [TASK_TYPES.REPAIR_RADIO]: 1.5,
-            [TASK_TYPES.PREPARE_MEDICAL]: 1.3,
         },
         learnMultiplier: 0.7,
     },
@@ -320,19 +310,18 @@ const SCENE_KEYS = {
 //   木柴：2人×8单位/h×8h=128单位 > 第1天1暖炉60单位消耗 ✓
 //   食物：2人×5单位/h×6h=60单位 > 24单位/天消耗 ✓
 //   电力：1人×12单位/h×6h=72单位 ≈ 72单位/天消耗 ✓
-//   建材：2人×6单位/h×4h=48单位 ≈ 50单位建暖炉 ✓
+//   废墟：探索（随机奖励，每天限3次） ✓
 const GATHER_RATES = {
-    woodFuel: 8,     // 木柴：8单位/小时，伐木场【v2.0：从30降为8，配合专长加成后合理】
-    food: 5,         // 食物：5单位/小时，冰湖/废墟【v2.0：从24降为5】
-    material: 6,     // 建材：6单位/小时，废墟采集场【v2.0：从15降为6】
-    power: 12,       // 电力：12单位/小时，工坊维护【v2.0：从20降为12】
+    woodFuel: 8,     // 木柴：8单位/小时，伐木场
+    food: 5,         // 食物：5单位/小时，冰湖
+    power: 12,       // 电力：12单位/小时，工坊/矿渣堆
 };
 
 // 户外采集区域坐标范围定义（与 VillageMap.resourceAreas 一致）
 const GATHER_OUTDOOR_AREAS = [
     { id: SCENE_KEYS.LUMBER_CAMP, resourceType: 'woodFuel', x: 2, y: 2, w: 8, h: 6 },   // 伐木场
     { id: SCENE_KEYS.FROZEN_LAKE, resourceType: 'food',     x: 2, y: 32, w: 8, h: 6 },  // 冰湖
-    { id: SCENE_KEYS.RUINS_SITE,  resourceType: 'material',  x: 38, y: 2, w: 10, h: 6 }, // 废墟
+    { id: SCENE_KEYS.RUINS_SITE,  resourceType: 'explore',   x: 38, y: 2, w: 10, h: 6 }, // 废墟探索点
     { id: SCENE_KEYS.ORE_PILE,    resourceType: 'power',     x: 38, y: 32, w: 10, h: 6 },// 矿渣堆
 ];
 
@@ -345,7 +334,7 @@ const GATHER_INDOOR_MAP = {
 const GATHER_LOCATION_MAP = {
     'lumber_camp': 'woodFuel',
     'frozen_lake': 'food',
-    'ruins_site': 'material',
+    'ruins_site': 'explore',
     'ore_pile': 'power',
     'workshop': 'power',
 };
@@ -354,7 +343,7 @@ const GATHER_LOCATION_MAP = {
 const GATHER_MIN_STAMINA = {
     woodFuel: 20,
     food: 15,
-    material: 20,
+    explore: 20,
     power: 10,
 };
 
@@ -362,7 +351,7 @@ const GATHER_MIN_STAMINA = {
 const RESOURCE_EMOJI = {
     woodFuel: '🪵',
     food: '🍞',
-    material: '🧱',
+    explore: '🔍',
     power: '⚡',
 };
 
@@ -457,12 +446,67 @@ class TaskSystem {
             this._applyReincarnationTaskBoost(day);
         }
 
-        // 广播任务清单
+        // 广播任务清单 — 详细显示分工方案，让玩家看到决策协调过程
         if (this.game.addEvent) {
-            this.game.addEvent(`📋 第${day}天任务清单已生成（${this.dailyTasks.length}项任务）`);
+            const strategyLabel = usedWorkPlan ? `策略:${this.game.reincarnationSystem && this.game.reincarnationSystem.getWorkPlanHolder() && this.game.reincarnationSystem.getWorkPlanHolder().workPlan ? this.game.reincarnationSystem.getWorkPlanHolder().workPlan.strategy || '轮回优化' : '默认'}` : '默认分工';
+            this.game.addEvent(`\n📋━━━ 第${day}天分工方案（${strategyLabel}）━━━`);
+            
+            // 按NPC分组显示任务
+            const tasksByNpc = {};
             for (const task of this.dailyTasks) {
-                const assignee = aliveNpcs.find(n => n.id === task.assignedNpcId);
-                this.game.addEvent(`  ${task.name} → ${assignee ? assignee.name : '待分配'}（目标: ${task.target}）`);
+                const npcId = task.assignedNpcId || 'unassigned';
+                if (!tasksByNpc[npcId]) tasksByNpc[npcId] = [];
+                tasksByNpc[npcId].push(task);
+            }
+            
+            const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
+            const roleEmoji = { zhao_chef: '👨‍🍳', lu_chen: '💪', li_shen: '👩‍🍳', wang_teacher: '👨‍🏫', old_qian: '👴', su_doctor: '👨‍⚕️', ling_yue: '🔍', qing_xuan: '🧪' };
+            
+            for (const [npcId, tasks] of Object.entries(tasksByNpc)) {
+                if (npcId === 'unassigned') continue;
+                const name = nameMap[npcId] || npcId;
+                const emoji = roleEmoji[npcId] || '👤';
+                const taskStr = tasks.map(t => `${t.name}(目标:${t.target})`).join(' + ');
+                const npc = aliveNpcs.find(n => n.id === npcId);
+                const staminaStr = npc ? `体力:${Math.round(npc.stamina)}` : '';
+                this.game.addEvent(`  ${emoji} ${name}: ${taskStr} ${staminaStr}`);
+            }
+            
+            // 显示未分配任务
+            if (tasksByNpc['unassigned']) {
+                for (const task of tasksByNpc['unassigned']) {
+                    this.game.addEvent(`  ❓ 待分配: ${task.name}`);
+                }
+            }
+            this.game.addEvent(`📋━━━ 共${this.dailyTasks.length}项任务，${aliveNpcs.length}人存活 ━━━\n`);
+
+            // 向右侧「决策动态」面板写入每日分工汇总卡片
+            const chatLogEl = document.getElementById('chat-log-content');
+            if (chatLogEl) {
+                const nameMap2 = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
+                const roleEmoji2 = { zhao_chef: '👨‍🍳', lu_chen: '💪', li_shen: '👩‍🍳', wang_teacher: '👨‍🏫', old_qian: '👴', su_doctor: '👨‍⚕️', ling_yue: '🔍', qing_xuan: '🧪' };
+                let planHTML = `<div class="decision-card" style="border-left:3px solid #a78bfa; margin:8px 4px; padding:8px 10px; background:rgba(40,30,80,0.8); border-radius:6px; font-size:12px; line-height:1.6;">`;
+                planHTML += `<div style="font-weight:bold; color:#c4b5fd; font-size:13px; margin-bottom:4px;">📋 第${day}天分工方案</div>`;
+                const tasksByNpc2 = {};
+                for (const task of this.dailyTasks) {
+                    const npcId = task.assignedNpcId || 'unassigned';
+                    if (!tasksByNpc2[npcId]) tasksByNpc2[npcId] = [];
+                    tasksByNpc2[npcId].push(task);
+                }
+                for (const [npcId, tasks] of Object.entries(tasksByNpc2)) {
+                    if (npcId === 'unassigned') continue;
+                    const name = nameMap2[npcId] || npcId;
+                    const em = roleEmoji2[npcId] || '👤';
+                    const taskStr = tasks.map(t => t.name).join('+');
+                    const npc = aliveNpcs.find(n => n.id === npcId);
+                    const stBar = npc ? `<span style="color:#6b7280; font-size:10px;"> 体力${Math.round(npc.stamina)}</span>` : '';
+                    planHTML += `<div style="color:#e2e8f0;">${em} <b>${name}</b>: <span style="color:#fbbf24;">${taskStr}</span>${stBar}</div>`;
+                }
+                planHTML += `</div>`;
+                const planCard = document.createElement('div');
+                planCard.innerHTML = planHTML;
+                chatLogEl.appendChild(planCard.firstElementChild);
+                chatLogEl.scrollTop = chatLogEl.scrollHeight;
             }
         }
 
@@ -473,8 +517,8 @@ class TaskSystem {
     _generateDay1Tasks(rs, fs, npcs) {
         // 大量收集木柴 — 赵铁柱
         this._addTask(TASK_TYPES.COLLECT_WOOD, 50, 'urgent', 'zhao_chef');
-        // 采集建材 — 陆辰
-        this._addTask(TASK_TYPES.COLLECT_MATERIAL, 50, 'urgent', 'lu_chen');
+        // 砍柴 — 陆辰（年轻力壮）
+        this._addTask(TASK_TYPES.COLLECT_WOOD, 40, 'urgent', 'lu_chen');
         // 采集食物 — 陆辰(次要轮换)
         this._addTask(TASK_TYPES.COLLECT_FOOD, 30, 'high', 'lu_chen');
         // 物资管理+分配食物 — 李婶
@@ -490,8 +534,8 @@ class TaskSystem {
         // 废墟侦察 — 歆玥
         this._addTask(TASK_TYPES.SCOUT_RUINS, 1, 'high', 'ling_yue');
         this._addTask(TASK_TYPES.BOOST_MORALE, 1, 'normal', 'ling_yue');
-        // 制药+陷阱 — 清璇
-        this._addTask(TASK_TYPES.CRAFT_MEDICINE, 1, 'high', 'qing_xuan');
+        // 医疗+陷阱 — 清璇
+        this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'qing_xuan');
         this._addTask(TASK_TYPES.SET_TRAP, 1, 'normal', 'qing_xuan');
         // 准备御寒
         this._addTask(TASK_TYPES.PREPARE_WARMTH, 1, 'normal', 'li_shen');
@@ -525,8 +569,8 @@ class TaskSystem {
         // 侦察+鼓舞 — 歆玥（短时外出侦察后鼓舞）
         this._addTask(TASK_TYPES.SCOUT_RUINS, 1, 'high', 'ling_yue');
         this._addTask(TASK_TYPES.BOOST_MORALE, 1, 'high', 'ling_yue');
-        // 制药+无线电 — 清璇
-        this._addTask(TASK_TYPES.CRAFT_MEDICINE, 1, 'high', 'qing_xuan');
+        // 医疗+无线电 — 清璇
+        this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'qing_xuan');
         this._addTask(TASK_TYPES.REPAIR_RADIO, 1, 'normal', 'qing_xuan');
     }
 
@@ -586,9 +630,9 @@ class TaskSystem {
         // 最后一次侦察 — 歆玥
         this._addTask(TASK_TYPES.SCOUT_RUINS, 1, 'high', 'ling_yue');
         this._addTask(TASK_TYPES.BOOST_MORALE, 1, 'normal', 'ling_yue');
-        // 赶工无线电+制药 — 清璇
+        // 赶工无线电+医疗 — 清璇
         this._addTask(TASK_TYPES.REPAIR_RADIO, 1, 'urgent', 'qing_xuan');
-        this._addTask(TASK_TYPES.CRAFT_MEDICINE, 1, 'high', 'qing_xuan');
+        this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'qing_xuan');
     }
 
     /** 第4天（-60°C大极寒）任务 — 全部室内 */
@@ -608,8 +652,8 @@ class TaskSystem {
         this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'urgent', 'su_doctor');
         // 鼓舞士气 — 歆玥
         this._addTask(TASK_TYPES.BOOST_MORALE, 1, 'urgent', 'ling_yue');
-        // 制药+辅助 — 清璇
-        this._addTask(TASK_TYPES.CRAFT_MEDICINE, 1, 'high', 'qing_xuan');
+        // 医疗+辅助 — 清璇
+        this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'qing_xuan');
     }
 
     // ============ 【智能分工系统】从workPlan生成任务 ============
@@ -673,8 +717,8 @@ class TaskSystem {
                 return Math.max(10, needed - Math.round(rs.food * 0.3));
             }
             case TASK_TYPES.COLLECT_MATERIAL: {
-                if (!rs) return 50;
-                return Math.max(10, 50 - Math.round(rs.material * 0.5));
+                // 废墟探索任务，固定优先级
+                return 30;
             }
             case TASK_TYPES.MAINTAIN_POWER: {
                 if (!rs) return 30;
@@ -1074,13 +1118,24 @@ class TaskSystem {
                 break;
             }
             case TASK_TYPES.PREPARE_MEDICAL: {
-                // 苏医生：治疗同场景中健康低的NPC
+                // 医疗救治：治疗同场景中健康低的NPC + 制作急救包
                 const sameScene = aliveNpcs.filter(n => n.currentScene === npc.currentScene && n.id !== npc.id && n.health < 60);
                 for (const other of sameScene) {
                     other.health = Math.min(100, other.health + 0.03 * efficiency * dt);
                     // 治疗失温
                     if (other.bodyTemp < 35 && other.bodyTemp !== undefined) {
                         other.bodyTemp = Math.min(36.5, other.bodyTemp + 0.005 * efficiency * dt);
+                    }
+                }
+                // 同时制作急救包（合并原CRAFT_MEDICINE功能）
+                if (!this.game._medkitCraftProgress) this.game._medkitCraftProgress = 0;
+                const craftRate = 0.5 * efficiency;
+                this.game._medkitCraftProgress += (dt / 7200) * craftRate; // 7200秒(2游戏小时)产出1份
+                if (this.game._medkitCraftProgress >= 1) {
+                    this.game._medkitCraftProgress -= 1;
+                    this.game._medkitCount = (this.game._medkitCount || 0) + 1;
+                    if (this.game.addEvent) {
+                        this.game.addEvent(`💊 ${npc.name}制作了1份急救包（共${this.game._medkitCount}份）`);
                     }
                 }
                 break;
@@ -1144,30 +1199,11 @@ class TaskSystem {
                     // 转为对应资源
                     if (item === 'medicine') rs2.addResource('medical', 5, npc.name);
                     else if (item === 'canned_food') rs2.addResource('food', 8, npc.name);
-                    else if (item === 'spare_parts') rs2.addResource('material', 5, npc.name);
+                    else if (item === 'spare_parts') rs2.addResource('power', 5, npc.name);
                 }
                 break;
             }
-            case TASK_TYPES.CRAFT_MEDICINE: {
-                // 清璇草药制剂：产出急救包
-                if (!this.game._medkitCraftProgress) this.game._medkitCraftProgress = 0;
-                const craftRate = 0.5 * efficiency; // 专长加成
-                this.game._medkitCraftProgress += (dt / 7200) * craftRate; // 7200秒(2游戏小时)产出1份
-                if (this.game._medkitCraftProgress >= 1) {
-                    this.game._medkitCraftProgress -= 1;
-                    this.game._medkitCount = (this.game._medkitCount || 0) + 1;
-                    if (this.game.addEvent) {
-                        this.game.addEvent(`💊 ${npc.name}制作了1份急救包（共${this.game._medkitCount}份）`);
-                    }
-                }
-                // 同时产出少量医疗物资
-                const rs3 = this.game.resourceSystem;
-                if (rs3) {
-                    const medYield = 0.003 * efficiency * dt;
-                    rs3.addResource('medical', medYield, npc.name);
-                }
-                break;
-            }
+            // CRAFT_MEDICINE已合并到PREPARE_MEDICAL
             case TASK_TYPES.SET_TRAP: {
                 // 清璇布置陷阱：完成后激活预警系统
                 // 进度在task.progress中累积，完成时触发效果
@@ -1266,7 +1302,7 @@ class TaskSystem {
      * 检测NPC当前是否在采集区域，返回对应的资源类型
      * 户外区域用坐标范围判定（因为NPC在户外时currentScene都是'village'）
      * 室内区域用currentScene直接匹配
-     * @returns {string|null} 资源类型(woodFuel/food/material/power)或null
+     * @returns {string|null} 资源类型(woodFuel/food/explore/power)或null
      */
     _detectGatherArea(npc) {
         const scene = npc.currentScene;
@@ -1361,13 +1397,13 @@ class TaskSystem {
             console.log(`[采集] ${npc.name} 在 ${areaId} 采集 ${resourceType} (坐标: ${(npc.x/32).toFixed(1)},${(npc.y/32).toFixed(1)})`);
             if (this.game.addEvent) {
                 const emoji = RESOURCE_EMOJI[resourceType] || '📦';
-                this.game.addEvent(`${emoji} ${npc.name} 到达采集区，开始${resourceType === 'woodFuel' ? '砍柴' : resourceType === 'food' ? '捕鱼' : resourceType === 'material' ? '采集建材' : '维护电力'}`);
+                this.game.addEvent(`${emoji} ${npc.name} 到达采集区，开始${resourceType === 'woodFuel' ? '砍柴' : resourceType === 'food' ? '捕鱼' : resourceType === 'explore' ? '探索废墟' : '维护电力'}`);
             }
             // 【任务8】更新NPC状态描述为具体的采集动作
             const gatherActionNames = {
                 woodFuel: '🪓 正在砍柴',
                 food: '🎣 正在捕鱼',
-                material: '🧱 正在采集建材',
+                explore: '🔍 正在探索废墟',
                 power: '🔧 正在维护电力'
             };
             npc.stateDesc = gatherActionNames[resourceType] || '正在采集';
@@ -1388,7 +1424,7 @@ class TaskSystem {
             const taskTypeMap = {
                 woodFuel: TASK_TYPES.COLLECT_WOOD,
                 food: TASK_TYPES.COLLECT_FOOD,
-                material: TASK_TYPES.COLLECT_MATERIAL,
+                explore: TASK_TYPES.COLLECT_MATERIAL,
                 power: TASK_TYPES.MAINTAIN_POWER,
             };
             const taskType = taskTypeMap[resourceType];
@@ -1676,14 +1712,15 @@ class TaskSystem {
                     }
                 }
             }
-            // 如果第1天没有暖炉建造任务，添加建材收集加量
+            // 如果第1天暖炉未建好，增加木柴收集量
             if (day === 1) {
                 for (const task of this.dailyTasks) {
-                    if (task.type === 'COLLECT_MATERIAL') {
+                    if (task.type === 'COLLECT_WOOD') {
                         const oldTarget = task.target;
-                        task.target = Math.round(task.target * 1.5);
-                        console.log(`[TaskSystem-轮回] 建材任务目标提升: ${oldTarget} → ${task.target}（上世暖炉未建好）`);
+                        task.target = Math.round(task.target * 1.3);
+                        console.log(`[TaskSystem-轮回] 木柴任务目标提升: ${oldTarget} → ${task.target}（上世暖炉未建好，增加木柴储备）`);
                         optimized = true;
+                        break; // 只提升一个
                     }
                 }
             }

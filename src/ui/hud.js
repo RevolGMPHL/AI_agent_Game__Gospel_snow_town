@@ -118,32 +118,16 @@
             { key: 'stamina',   label: '💪 体力', value: npc.stamina,   level: npc.getStaminaLevel(),   max: 100 },
             { key: 'sanity',    label: '🧠 San值', value: npc.sanity,    level: npc.getSanityLevel(),    max: 100 },
             { key: 'health',    label: '🫀 健康', value: npc.health,    level: npc.getHealthLevel(),    max: 100 },
+            { key: 'hunger',    label: '🍖 饱腹', value: npc.hunger || 50, level: npc.getHungerStatus ? npc.getHungerStatus() : '正常', max: 100 },
             { key: 'bodyTemp',  label: '🌡️ 体温', value: npc.bodyTemp || 36.5, level: npc.getBodyTempStatus ? npc.getBodyTempStatus() : '正常', max: 36.5, isTemp: true },
-            { key: 'charisma',  label: '✨ 魅力', value: npc.charisma,  level: npc.getCharismaLevel(),  max: 100 },
-            { key: 'wisdom',    label: '🧠 智慧', value: npc.wisdom,    level: npc.getWisdomLevel(),    max: 100 },
-            { key: 'empathy',   label: '💬 情商', value: npc.empathy,   level: npc.getEmpathyLevel(),   max: 100 },
-            { key: 'savings',   label: '💰 存款', value: npc.savings,   level: npc.getSavingsLevel(),   max: null },
         ];
 
         let html = '<div class="attr-grid">';
         for (const a of attrs) {
             const val = Math.round(a.value);
-            if (a.key === 'savings') {
-                // 存款：不用进度条，直接显示数值
-                html += `<div class="attr-card savings-card">
-                    <div class="attr-card-header">
-                        <span class="attr-label">${a.label}</span>
-                    </div>
-                    <div class="attr-value" style="color:#F0C050;">¥${val}</div>
-                    <div class="attr-level">${a.level}</div>
-                </div>`;
-            } else {
+            {
                 const pct = a.isTemp ? Math.min(100, Math.max(0, (val / a.max) * 100)) : Math.min(100, Math.max(0, val));
                 const displayVal = a.isTemp ? a.value.toFixed(1) + '°C' : val;
-                let barColor;
-                if (val >= 60) barColor = '';
-                else if (val >= 30) barColor = '';
-                else barColor = '';
                 html += `<div class="attr-card">
                     <div class="attr-card-header">
                         <span class="attr-label">${a.label}</span>
@@ -170,13 +154,10 @@
         if (npc.stamina < 20) hints.push({ text: '⚠️ 体力极低，急需休息', cls: 'warn' });
         if (npc.sanity < 30 && !npc.isCrazy) hints.push({ text: '🧠 精神状态很差，建议去医院找苏医生咨询或看歆玥演出', cls: 'warn' });
         if (npc.health < 30) hints.push({ text: '⚠️ 健康状况很差，容易生病', cls: 'warn' });
-        if (npc.savings < 50) hints.push({ text: '💸 手头拮据，需要节省开支', cls: 'warn' });
         if (npc.stamina >= 80) hints.push({ text: '💪 精力充沛，做事效率高', cls: 'good' });
         if (npc.sanity >= 80) hints.push({ text: '🧠 精神充沛，头脑清晰', cls: 'good' });
-        if (npc.charisma >= 80) hints.push({ text: '✨ 魅力十足，社交能力强', cls: 'good' });
-        if (npc.wisdom >= 80) hints.push({ text: '🧠 非常睿智，思维敏捷', cls: 'good' });
-        if (npc.empathy >= 80) hints.push({ text: '💬 情商极高，善解人意', cls: 'good' });
         if (npc.health >= 80) hints.push({ text: '🫀 身体强健', cls: 'good' });
+        if (npc.hunger < 20) hints.push({ text: '🍖 非常饥饿，急需进食', cls: 'warn' });
 
         if (hints.length > 0) {
             html += '<div class="attr-status-hints">';
@@ -653,7 +634,7 @@ const resp = await fetch('http://localhost:8080/api/save-debug-log', {
                             <span class="past-life-stat">🪵 <span class="past-life-stat-val">${res.woodFuel}</span></span>
                             <span class="past-life-stat">🍞 <span class="past-life-stat-val">${res.food}</span></span>
                             <span class="past-life-stat">⚡ <span class="past-life-stat-val">${res.power}</span></span>
-                            <span class="past-life-stat">🧱 <span class="past-life-stat-val">${res.material}</span></span>
+                <span class="past-life-stat">🔍 <span class="past-life-stat-val">探索</span></span>
                             <span class="past-life-stat">🔥 第二暖炉 <span class="past-life-stat-val">${life.secondFurnaceBuilt ? '✅' : '❌'}</span></span>
                         </div>
                     `;
@@ -854,11 +835,21 @@ const resp = await fetch('http://localhost:8080/api/save-debug-log', {
         // ============ 资源面板更新 ============
         const rs = this.resourceSystem;
         if (rs) {
-            const maxWood = 120, maxFood = 80, maxPower = 120, maxMaterial = 80;
+            const maxWood = 120, maxFood = 80, maxPower = 120;
             this._updateResBar('res-wood-fill', 'res-wood-val', rs.woodFuel, maxWood);
             this._updateResBar('res-food-fill', 'res-food-val', rs.food, maxFood);
             this._updateResBar('res-power-fill', 'res-power-val', rs.power, maxPower);
-            this._updateResBar('res-material-fill', 'res-material-val', rs.material, maxMaterial);
+
+            // 废墟探索次数显示
+            const exploreRemaining = rs.getRuinsExploresRemaining ? rs.getRuinsExploresRemaining() : 3;
+            const exploreMax = 3;
+            const exploreFill = document.getElementById('res-explore-fill');
+            const exploreVal = document.getElementById('res-explore-val');
+            if (exploreFill) exploreFill.style.width = `${(exploreRemaining / exploreMax) * 100}%`;
+            if (exploreVal) {
+                exploreVal.textContent = `${exploreRemaining}/${exploreMax}`;
+                exploreVal.style.color = exploreRemaining === 0 ? '#f87171' : '';
+            }
 
             // 急救包数量显示
             const medkitVal = document.getElementById('res-medkit-val');

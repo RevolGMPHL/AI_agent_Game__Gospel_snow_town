@@ -14,7 +14,7 @@
             // ---- 户外资源采集区域 ----
             this.resourceAreas = [
                 { id: 'lumber_camp', name: '🌲伐木场', x: 2, y: 2, w: 8, h: 6, color: '#5A6B50', resource: 'wood', danger: '中' },
-                { id: 'ruins_site',  name: '🏔️废墟',   x: 38, y: 2, w: 10, h: 6, color: '#7A6A5A', resource: 'material', danger: '高' },
+                { id: 'ruins_site',  name: '🔍废墟',   x: 38, y: 2, w: 10, h: 6, color: '#7A6A5A', resource: 'explore', danger: '高' },
                 { id: 'frozen_lake', name: '🎣冰湖',   x: 2, y: 32, w: 8, h: 6, color: '#90B8D0', resource: 'food', danger: '中' },
                 { id: 'ore_pile',    name: '⛏️矿渣堆', x: 38, y: 32, w: 10, h: 6, color: '#8A7A6A', resource: 'power', danger: '中' },
             ];

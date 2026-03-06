@@ -203,8 +203,8 @@
                 break;
             }
             case 'medical_heal': {
-                // 医疗效果：场景内NPC额外健康恢复
-                // 【修复】dt 需转为游戏秒
+                // 【v2.1重构】医疗效果：同场景NPC健康恢复（降低速率，让急救包有存在价值）
+                // 修改：同场景恢复从0.01降为0.005/游戏秒，移除全局光环
                 const healGameSeconds = dt * (game.timeSpeed || 60);
                 const healPowerBonus = rs ? (rs.getPowerEfficiencyBonus ? rs.getPowerEfficiencyBonus(this.currentScene) : 1.0) : 1.0;
                 const npcsInScene = game.npcs.filter(n =>
@@ -212,25 +212,18 @@
                 );
                 for (const npc of npcsInScene) {
                     if (npc.health < 100) {
-                        npc.health = Math.min(100, npc.health + 0.01 * healGameSeconds * specialtyMultiplier * healPowerBonus);
+                        // 【v2.1】同场景健康恢复从0.01降为0.005（让急救包有用）
+                        npc.health = Math.min(100, npc.health + 0.005 * healGameSeconds * specialtyMultiplier * healPowerBonus);
                     }
-                    // 【新增】同场景NPC San值恢复（心理疏导，苏岩therapy专长×1.5）
+                    // 同场景NPC San值恢复（心理疏导）
                     if (npc.sanity < 100) {
                         npc.sanity = Math.min(100, npc.sanity + 0.005 * healGameSeconds * specialtyMultiplier);
                     }
                 }
-                // 【新增】全局健康恢复光环：对不在同场景的存活NPC提供+0.005/游戏秒的恢复
-                const globalHealNpcs = game.npcs.filter(n =>
-                    !n.isDead && n.id !== this.id && n.currentScene !== this.currentScene
-                );
-                for (const npc of globalHealNpcs) {
-                    if (npc.health < 100) {
-                        npc.health = Math.min(100, npc.health + 0.005 * healGameSeconds);
-                    }
-                }
-                // 【增强路径】苏岩坐诊时急救包效果翻倍（+50HP），触发条件放宽到健康<50
+                // 【v2.1】移除全局健康恢复光环（原+0.005/秒太强，导致急救包永远用不上）
+                // 急救包触发阈值从健康<50提高到<60，让急救包更容易触发
                 if (game._medkitCount > 0) {
-                    const critical = npcsInScene.filter(n => n.health < 50).sort((a, b) => a.health - b.health);
+                    const critical = npcsInScene.filter(n => n.health < 60).sort((a, b) => a.health - b.health);
                     if (critical.length > 0 && !this._medkitUseCooldown) {
                         const target = critical[0];
                         game._medkitCount--;
@@ -246,6 +239,23 @@
                     }
                 }
                 if (this._medkitUseCooldown > 0) this._medkitUseCooldown -= dt * (game.timeSpeed || 60);
+                break;
+            }
+            case 'explore_ruins': {
+                // 废墟探索——每1游戏小时触发一次随机探索
+                if (!this._ruinsExploreTimer) this._ruinsExploreTimer = 0;
+                const exploreGameSeconds = dt * (game.timeSpeed || 60);
+                this._ruinsExploreTimer += exploreGameSeconds;
+                if (this._ruinsExploreTimer >= 3600) { // 每游戏小时一次
+                    this._ruinsExploreTimer -= 3600;
+                    if (rs && rs.performRuinsExploration) {
+                        const result = rs.performRuinsExploration(this);
+                        if (result && result.type === 'exhausted') {
+                            // 废墟已搜刮干净，回退到默认行为
+                            this._fallbackToRoleDefaultAction(game);
+                        }
+                    }
+                }
                 break;
             }
             case 'furnace_maintain': {
@@ -317,14 +327,17 @@
                     dynamicBubble = `🪓 砍柴中（木柴+${rateDisplay}/h）`;
                 } else if (matchedEffect.resourceType === 'food') {
                     dynamicBubble = `🎣 采集食物中（食物+${rateDisplay}/h）`;
-                } else if (matchedEffect.resourceType === 'material') {
-                    dynamicBubble = `🧱 采集建材中（建材+${rateDisplay}/h）`;
                 } else if (matchedEffect.resourceType === 'power') {
                     // 区分维修发电机和修理工具
                     const isRepairTool = (this.stateDesc || '').includes('修理工具');
-                    dynamicBubble = isRepairTool
-                        ? `🔧 修理工具（⚡+${rateDisplay}/h）`
-                        : `🔧 维修发电机中（⚡+${rateDisplay}/h）`;
+                    const isOutdoorMining = this.currentScene === 'village';
+                    if (isOutdoorMining) {
+                        dynamicBubble = `⛏️ 采矿中（⚡+${rateDisplay}/h）`;
+                    } else {
+                        dynamicBubble = isRepairTool
+                            ? `🔧 修理工具（⚡+${rateDisplay}/h）`
+                            : `🔧 维修发电机中（⚡+${rateDisplay}/h）`;
+                    }
                 }
                 break;
             }
@@ -341,6 +354,15 @@
                 dynamicBubble = game._radioRepaired
                     ? `📻 无线电已修好！`
                     : `📻 修理无线电（进度${radioProgress}%）`;
+                break;
+            }
+            case 'explore_ruins': {
+                // 废墟探索气泡
+                const rs2 = game.resourceSystem;
+                const remaining = rs2 ? rs2.getRuinsExploresRemaining() : 0;
+                dynamicBubble = remaining > 0
+                    ? `🔍 探索废墟中…（今日剩${remaining}次）`
+                    : `🔍 废墟已搜刮干净`;
                 break;
             }
             case 'build_progress': {
@@ -364,8 +386,8 @@
                 break;
             }
             case 'medical_heal': {
-                // 动态计算每小时HP恢复量（基础0.01/游戏秒 × 3600 × 专长倍率）
-                const healPerHour = (0.01 * 3600 * specialtyMultiplier).toFixed(0);
+                // 【v2.1】更新气泡文本：基础0.005/游戏秒
+                const healPerHour = (0.005 * 3600 * specialtyMultiplier).toFixed(0);
                 const medkitInfo = (game._medkitCount || 0) > 0 ? `💊×${game._medkitCount}` : '⚠️无急救包';
                 dynamicBubble = `🏥 医疗救治中（HP+${healPerHour}/h ${medkitInfo}）`;
                 break;

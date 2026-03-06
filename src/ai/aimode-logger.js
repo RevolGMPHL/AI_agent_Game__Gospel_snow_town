@@ -165,17 +165,16 @@ class AIModeLogger {
         const rs = game.resourceSystem;
         if (!rs) return;
 
-        // 四项资源当前储量
+        // 三项资源当前储量
         const woodFuel = rs.woodFuel != null ? rs.woodFuel.toFixed(1) : '?';
         const food = rs.food != null ? rs.food.toFixed(1) : '?';
         const power = rs.power != null ? rs.power.toFixed(1) : '?';
-        const material = rs.material != null ? rs.material.toFixed(1) : '?';
 
         // 本日累计消耗/采集
         const dc = rs.dailyConsumed || {};
         const dg = rs.dailyCollected || {};
-        const consumedStr = `木柴:${(dc.woodFuel || 0).toFixed(1)} 食物:${(dc.food || 0).toFixed(1)} 电力:${(dc.power || 0).toFixed(1)} 建材:${(dc.material || 0).toFixed(1)}`;
-        const collectedStr = `木柴:${(dg.woodFuel || 0).toFixed(1)} 食物:${(dg.food || 0).toFixed(1)} 电力:${(dg.power || 0).toFixed(1)} 建材:${(dg.material || 0).toFixed(1)}`;
+        const consumedStr = `木柴:${(dc.woodFuel || 0).toFixed(1)} 食物:${(dc.food || 0).toFixed(1)} 电力:${(dc.power || 0).toFixed(1)}`;
+        const collectedStr = `木柴:${(dg.woodFuel || 0).toFixed(1)} 食物:${(dg.food || 0).toFixed(1)} 电力:${(dg.power || 0).toFixed(1)}`;
 
         // 暖炉状态
         let furnaceInfo = '暖炉:N/A';
@@ -188,7 +187,7 @@ class AIModeLogger {
             }
         }
 
-        this.log('RESOURCE', `储量 木柴:${woodFuel} 食物:${food} 电力:${power} 建材:${material} | 今日消耗[${consumedStr}] 采集[${collectedStr}] | ${furnaceInfo}`);
+        this.log('RESOURCE', `储量 木柴:${woodFuel} 食物:${food} 电力:${power} | 今日消耗[${consumedStr}] 采集[${collectedStr}] | ${furnaceInfo}`);
     }
 
     /**

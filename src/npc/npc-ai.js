@@ -143,6 +143,92 @@
         }
     }
 
+    /** 向右侧「决策动态」面板写入NPC决策卡片 */;
+    proto._addDecisionCard = function(action, parsed, game) {
+        const chatLogEl = document.getElementById('chat-log-content');
+        if (!chatLogEl) return;
+
+        const time = game.getTimeStr ? game.getTimeStr() : '';
+        const day = game.dayCount || 1;
+
+        // 角色信息
+        const roleEmoji = {
+            zhao_chef: '👨‍🍳', lu_chen: '💪', li_shen: '👩‍🍳', wang_teacher: '👨‍🏫',
+            old_qian: '👴', su_doctor: '👨‍⚕️', ling_yue: '🍄', qing_xuan: '🌿'
+        };
+        const roleColors = {
+            zhao_chef: '#f87171', lu_chen: '#60a5fa', li_shen: '#fb923c', wang_teacher: '#34d399',
+            old_qian: '#a78bfa', su_doctor: '#38bdf8', ling_yue: '#f472b6', qing_xuan: '#a3e635'
+        };
+        const priorityColors = { urgent: '#ef4444', normal: '#3b82f6', low: '#6b7280' };
+        const priorityLabels = { urgent: '🔥紧急', normal: '执行', low: '随意' };
+        const actionLabels = {
+            go_to: '前往', rest: '休息', eat: '吃饭', work: '工作',
+            accompany: '陪伴', stay: '留守', wander: '闲逛'
+        };
+
+        const emoji = roleEmoji[this.id] || '👤';
+        const nameColor = roleColors[this.id] || '#e2e8f0';
+        const pColor = priorityColors[action.priority] || '#6b7280';
+        const pLabel = priorityLabels[action.priority] || action.priority;
+        const actionLabel = actionLabels[action.type] || action.type;
+        const targetDesc = action.target ? (GST.NPC.ACTION_TARGETS[action.target] || action.target).split('（')[0] : '';
+
+        // 构建卡片HTML — 更像角色内心独白
+        let cardHTML = `
+            <div class="decision-card" style="border-left:3px solid ${nameColor}; margin:6px 4px; padding:8px 10px; background:rgba(25,25,45,0.75); border-radius:6px; font-size:12px; line-height:1.6;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span style="font-weight:bold; font-size:13px; color:${nameColor};">${emoji} ${this.name}</span>
+                    <span style="font-size:10px; color:#94a3b8;">D${day} ${time}</span>
+                </div>`;
+
+        // 内心独白（reasoning）— 最重要的部分，放在最前面
+        if (parsed.reasoning) {
+            cardHTML += `<div style="color:#e2e8f0; margin:4px 0; font-size:12px; font-style:italic; padding:4px 8px; background:rgba(255,255,255,0.05); border-radius:4px;">💬 "${parsed.reasoning}"</div>`;
+        }
+
+        // 行动决定
+        cardHTML += `<div style="color:#94a3b8; margin-top:4px; font-size:11px;">`;
+        cardHTML += `<span style="color:${pColor}; font-weight:bold;">${pLabel}</span> `;
+        cardHTML += `<span style="color:#e2e8f0;">${actionLabel}</span>`;
+        if (targetDesc) {
+            cardHTML += ` → <span style="color:#fbbf24;">${targetDesc}</span>`;
+        }
+        if (action.reason) {
+            cardHTML += `<span style="color:#94a3b8; margin-left:4px;">（${action.reason}）</span>`;
+        }
+        cardHTML += `</div>`;
+
+        // 担忧（threat）
+        const threat = parsed.threat_analysis || '';
+        if (threat && threat !== '暂时还好' && threat !== '无明显威胁' && threat !== '未分析' && threat !== '无') {
+            cardHTML += `<div style="color:#fca5a5; margin-top:3px; font-size:11px;">😟 ${threat}</div>`;
+        }
+
+        // 希望（opportunity）
+        const oppo = parsed.opportunity_analysis || '';
+        if (oppo && oppo !== '先把手头的活干好' && oppo !== '无特别机会' && oppo !== '未分析' && oppo !== '无') {
+            cardHTML += `<div style="color:#86efac; margin-top:2px; font-size:11px;">✨ ${oppo}</div>`;
+        }
+
+        // 同伴邀请
+        if (action.companion) {
+            cardHTML += `<div style="color:#c4b5fd; margin-top:2px; font-size:11px;">🤝 想拉上${action.companion}</div>`;
+        }
+
+        cardHTML += `</div>`;
+
+        const card = document.createElement('div');
+        card.innerHTML = cardHTML;
+        chatLogEl.appendChild(card.firstElementChild);
+        chatLogEl.scrollTop = chatLogEl.scrollHeight;
+
+        // 限制面板中卡片数量，超过50张时删除旧的
+        while (chatLogEl.children.length > 50) {
+            chatLogEl.removeChild(chatLogEl.firstChild);
+        }
+    }
+
     /** 清除同伴状态 */;
 
     proto._clearCompanionState = function() {
@@ -177,8 +263,10 @@
             'lumber_camp_door': 'woodFuel',
             'frozen_lake': 'food',
             'frozen_lake_door': 'food',
-            'ruins_site': 'material',
-            'ruins_site_door': 'material',
+            'ore_pile': 'power',
+            'ore_pile_door': 'power',
+            'ruins_site': 'explore',
+            'ruins_site_door': 'explore',
             'workshop_door': 'power'
         };
         if (action.type === 'go_to' && action.target && gatherTargets[action.target]) {
@@ -341,7 +429,7 @@
             'wang_teacher': { target: 'workshop_door',  desc: '去工坊维修发电机',     stateDesc: '维修发电机' },
             'su_doctor':    { target: 'medical_door',   desc: '去医疗站坐诊',         stateDesc: '坐诊' },
             'old_qian':     { target: 'furnace_plaza',  desc: '去暖炉广场安抚大家',   stateDesc: '安抚' },
-            'ling_yue':     { target: 'ruins_site',     desc: '去废墟侦察',           stateDesc: '废墟' },
+            'ling_yue':     { target: 'ore_pile',       desc: '去矿渣堆采矿',         stateDesc: '采矿' },
             'lu_chen':      { target: 'lumber_camp',    desc: '去伐木场搬运',         stateDesc: '搬运木柴' },
             'qing_xuan':    { target: 'medical_door',   desc: '去医疗站制作草药',     stateDesc: '制作草药' },
         };
@@ -490,7 +578,7 @@
     proto._getTaskOverrideDesc = function() {
         const override = this._taskOverride;
         if (!override.isActive) return null;
-        const resourceNames = { woodFuel: '砍柴', food: '采集食物', material: '采集建材', power: '维护电力' };
+        const resourceNames = { woodFuel: '砍柴', food: '采集食物', explore: '探索废墟', power: '维护电力' };
         if (override.resourceType && resourceNames[override.resourceType]) {
             return this._taskOverrideReached
                 ? `正在${resourceNames[override.resourceType]}中...`
@@ -920,14 +1008,14 @@ game.addEvent(`🤝 ${this.name} 邀请 ${companion.name} 一起去${GST.NPC.ACT
             return;
         }
 
-        // 连续20秒发呆且无决策冷却时，强制触发一次行动决策（防止长时间空闲）
-        if (this._idleWatchdogTimer > 20 && this._idleWatchdogTimer <= 30 && this._actionDecisionCooldown > 0) {
+        // 连续30秒发呆且无决策冷却时，强制触发一次行动决策（防止长时间空闲）
+        if (this._idleWatchdogTimer > 30 && this._idleWatchdogTimer <= 40 && this._actionDecisionCooldown > 0) {
             this._actionDecisionCooldown = 0; // 清零冷却，允许立即触发决策
-            this._logDebug('schedule', `[兜底] ${this.name} 空闲超过20秒，强制触发行动决策`);
+            this._logDebug('schedule', `[兜底] ${this.name} 空闲超过30秒，强制触发行动决策`);
         }
 
-        // 连续10秒发呆，触发恢复
-        if (this._idleWatchdogTimer > 10) {
+        // 连续20秒发呆，触发恢复（从10秒提高到20秒，减少误触发）
+        if (this._idleWatchdogTimer > 20) {
             // 输出详细状态快照
             console.warn(`[NPC-${this.name}] [兜底] 发呆超时${Math.round(this._idleWatchdogTimer)}秒，触发自动恢复`, {
                 actionOverride: this._actionOverride,
@@ -959,41 +1047,37 @@ game.addEvent(`🤝 ${this.name} 邀请 ${companion.name} 一起去${GST.NPC.ACT
                 this._navigateToScheduleTarget(this._taskOverride.targetLocation, game);
             }
 
-            // 通知事件
-            if (game && game.addEvent) {
-                game.addEvent(`⚠️ ${this.name} 回过神来`);
+            // 如果没有恢复任务，执行角色默认行动（去最擅长的采集点）
+            if (!this._taskOverride || !this._taskOverride.isActive) {
+                this._fallbackToRoleDefaultAction(game);
             }
 
-            this._logDebug('schedule', `[兜底] ${this.name} 发呆超时，强制恢复日程`);
+            // 不再在事件日志刷屏，只记录debug日志
+            this._logDebug('schedule', `[兜底] ${this.name} 发呆超时${Math.round(this._idleWatchdogTimer)}秒，强制恢复`);
             this._idleWatchdogTimer = 0;
 
             // 累计触发计数
             this._idleWatchdogCount++;
             const now = Date.now();
-            if (now - this._idleWatchdogResetTime > 60000) {
-                // 超过60秒，重置计数
+            if (now - this._idleWatchdogResetTime > 120000) {
+                // 超过120秒，重置计数
                 this._idleWatchdogCount = 1;
                 this._idleWatchdogResetTime = now;
             }
 
-            // 同一NPC在60秒内连续触发超过3次，强制传送到暖炉广场
+            // 同一NPC在120秒内连续触发超过5次，强制传送到暖炉广场
             // 【修复】行为锁/吃饭/睡觉/治疗/休息缓冲期内不触发强制传送
-            if (this._idleWatchdogCount > 3) {
+            if (this._idleWatchdogCount > 5) {
                 const isProtected = this.isEating || this.isSleeping || this._isBeingTreated
                     || this._restCooldownTimer > 0 || this._currentBehaviorLock;
                 if (isProtected) {
                     console.log(`[NPC-${this.name}] [兜底] 反复发呆但处于保护状态(${this._currentBehaviorLock || 'protected'})，跳过强制传送`);
                     this._idleWatchdogCount = 0;
                 } else {
-                    const furnaceLoc = GST.SCHEDULE_LOCATIONS['furnace_plaza'];
-                    if (furnaceLoc) {
-                        console.warn(`[NPC-${this.name}] [兜底] 60秒内发呆超过3次，强制传送到暖炉广场`);
-                        this._teleportTo(furnaceLoc.scene, furnaceLoc.x, furnaceLoc.y);
-                        this._idleWatchdogCount = 0;
-                        if (game && game.addEvent) {
-                            game.addEvent(`🚨 ${this.name} 被传送到暖炉广场（反复发呆）`);
-                        }
-                    }
+                    // 不再传送到暖炉广场，而是执行角色默认行动
+                    console.warn(`[NPC-${this.name}] [兜底] 120秒内发呆超过5次，强制执行默认行动`);
+                    this._fallbackToRoleDefaultAction(game);
+                    this._idleWatchdogCount = 0;
                 }
             }
         }
@@ -1013,8 +1097,8 @@ game.addEvent(`🤝 ${this.name} 邀请 ${companion.name} 一起去${GST.NPC.ACT
         'lumber_yard':     '伐木场（砍柴→木柴+10/h，户外，需体力）',
         'lumber_camp':     '伐木营地（砍柴→木柴+10/h，户外，需体力）',
         'frozen_lake':     '冰湖（捕鱼→食物+8/h，户外，需体力）',
-        'ruins':           '废墟（搜寻→建材+5/h，户外，需体力）',
-        'ruins_site':      '废墟采集场（搜集建材→建材+5/h，户外，需体力）',
+        'ore_pile':        '矿渣堆（采矿→电力+12/h，户外，需体力）',
+        'ruins_site':      '废墟探索点（探索→随机获得物资，每天限3次，户外）',
     };
 
     /** 行动类型列表 */
@@ -1196,6 +1280,7 @@ ${game.reincarnationSystem ? (() => { const lessons = game.reincarnationSystem.g
 11. priority说明：urgent=生存紧急（生死相关）, normal=立即执行, low=仅记录意向。
 12. 下雨/大雪/暴风雪时不要去户外，应该选择室内场所。
 13. 资源紧张度>0.3时，体力型角色（体力>30）应优先选go_to到采集区产出资源（lumber_yard/frozen_lake/ruins），而不是stay/work做辅助工作。
+⚠️ 但是：没有采集专长的角色（如老钱、苏岩）不应该去砍柴/采食物/修发电机，效率极低浪费时间！他们应该做自己擅长的事（安抚士气、治疗伤员等）。只有当所有采集岗位都已有人且自己无事可做时才考虑帮忙采集。
 14. 你的角色专长：${this._getSpecialtyDescription()}，擅长的工作效率更高，优先选择擅长的任务。
 
 可选目标位置：
@@ -1241,15 +1326,15 @@ ${this._priorityOverride ? `⚠️ 当前P0紧急状态：${this._priorityOverri
 ${allNPCStatus}
 ${friendCrisisHint}
 
-请决定你的下一步行动。先分析当前面临的奖励机会和惩罚威胁，再做决策。用纯JSON回复：
+请决定你的下一步行动。以「${this.name}」的第一人称视角思考，用你的性格和口吻来表达。用纯JSON回复：
 {
-  "threat_analysis": "当前面临的最大威胁/惩罚是什么？（如：San值过低即将发疯、健康差体力恢复慢、饥饿等；如果没有就写'无明显威胁'）",
-  "opportunity_analysis": "当前最接近完成的目标奖励机会是什么？（如：还差1人就完成聊天目标、工作时长快达标等；如果没有就写'无特别机会'）",
-  "reasoning": "综合奖惩分析的决策理由（一句话）",
+  "threat_analysis": "（用第一人称、角色口吻说出最担心的事，如：'木柴快见底了，今晚暖炉怕是撑不住…'、'我这身子骨扛不住了，得歇歇'；没有就写'暂时还好'）",
+  "opportunity_analysis": "（用角色口吻说出看到的希望，如：'再砍几趟柴，今天目标就够了！'、'铁柱哥在那边干活，搭把手效率高'；没有就写'先把手头的活干好'）",
+  "reasoning": "（一句话内心独白，要有角色性格特色，像真人在自言自语，如：'得赶紧干活，磨蹭不得！'）",
   "action": {
     "type": "go_to|rest|eat|work|accompany|stay|wander",
     "target": "目标位置key（从可选列表选，type为work/stay/wander时可省略）",
-    "reason": "行动原因（简短）",
+    "reason": "行动原因（简短自然的口语化表达）",
     "priority": "urgent|normal|low",
     "companion": "想邀请同行的人名（可选，没有就不填这个字段）"
   }
@@ -1411,11 +1496,15 @@ if (!action.target || !GST.NPC.ACTION_TARGETS[action.target]) {
                     this.addMemory(`[意向] ${action.reason}`);
                 }
 
-                // 事件日志
+                // 事件日志 — 输出完整决策过程，让玩家看到LLM如何思考和协调
                 if (game.addEvent) {
-                    const emoji = action.priority === 'urgent' ? '🚨' : '🤔';
-                    game.addEvent(`${emoji} ${this.name} 决定：${action.reason}`);
+                    const emoji = action.priority === 'urgent' ? '🚨' : action.priority === 'normal' ? '🎯' : '🤔';
+                    const targetLabel = GST.NPC.ACTION_TARGETS[action.target] ? action.target : '';
+                    game.addEvent(`${emoji} ${this.name} 决策：${action.type}→${targetLabel || action.type} ${action.reason}`);
                 }
+
+                // 右侧「决策动态」面板 — 显示每个人的决策卡片
+                this._addDecisionCard(action, parsed, game);
             }
         } catch (err) {
             console.error(`[行动决策] ${this.name} 调用失败:`, err);

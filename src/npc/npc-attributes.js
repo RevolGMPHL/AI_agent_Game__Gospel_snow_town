@@ -25,9 +25,9 @@
             return;
         }
 
-        // 遍历所有存活NPC，找到健康<50且无个人冷却的NPC
+        // 遍历所有存活NPC，找到健康<60且无个人冷却的NPC
         const criticalNpcs = game.npcs.filter(n =>
-            !n.isDead && n.health < 50 && !(n._medkitUseCooldown > 0)
+            !n.isDead && n.health < 60 && !(n._medkitUseCooldown > 0)
         ).sort((a, b) => a.health - b.health);
 
         if (criticalNpcs.length === 0) return;
@@ -203,12 +203,10 @@
                 if (this._affinityCooldown && this._affinityCooldown[other.id] > 0) continue;
                 if (other._affinityCooldown && other._affinityCooldown[this.id] > 0) continue;
 
-                // 情商越高，社交加成越大
-                const empathyMultiplier = 0.8 + (this.empathy / 100) * 0.4;
                 // 【修复】好感度越高，被动增长越慢（衰减因子）
                 const currentAff = this.getAffinity(other.id);
                 const diminishing = currentAff >= 80 ? 0.1 : (currentAff >= 60 ? 0.3 : (currentAff >= 40 ? 0.6 : 1.0));
-                const finalBonus = bonus * empathyMultiplier * diminishing;
+                const finalBonus = bonus * diminishing;
                 // 太小的增量忽略（防止无意义的高精度浮点累加）
                 if (finalBonus < 0.05) continue;
                 this.changeAffinity(other.id, finalBonus);
@@ -232,14 +230,17 @@
         if (this._stateOverride === 'exhausted') {
             // 目标：回宿舍 → 到达后直接入睡
             if (this.currentScene === this.homeName) {
-                // 检查是否到达了床位
-                const bedLoc = GST.SCHEDULE_LOCATIONS[this.homeName + '_inside'];
+                // 检查是否到达了床位（使用NPC专属床位坐标）
+                const bedLoc = this._getBedLocation ? this._getBedLocation() : GST.SCHEDULE_LOCATIONS[this.homeName + '_inside'];
                 if (bedLoc) {
                     const pos = this.getGridPos();
                     const dist = Math.abs(pos.x - bedLoc.x) + Math.abs(pos.y - bedLoc.y);
                     if (dist <= 3) {
-                        // 到达房间 → 强制入睡
+                        // 到达房间 → 强制入睡，并修正坐标到精确床位
                         this._clearStateOverride();
+                        // 【修复】修正坐标到精确床位位置
+                        this.x = bedLoc.x * GST.TILE;
+                        this.y = bedLoc.y * GST.TILE;
                         this.isSleeping = true;
                         this._forcedSleep = true;  // 【标记强制睡眠】防止被日程起床逻辑误唤醒
                         this._forcedSleepTimer = 0;
@@ -262,9 +263,9 @@
                         return;
                     }
                 }
-                // 在宿舍但还没到床位 → 继续走
+                // 在宿舍但还没到床位 → 导航到NPC专属床位
                 if (!this.isMoving && this.currentPath.length === 0) {
-                    const bedLoc2 = GST.SCHEDULE_LOCATIONS[this.homeName + '_inside'];
+                    const bedLoc2 = this._getBedLocation ? this._getBedLocation() : GST.SCHEDULE_LOCATIONS[this.homeName + '_inside'];
                     if (bedLoc2) {
                         this._pathTo(bedLoc2.x, bedLoc2.y, game);
                     }
@@ -465,8 +466,6 @@
             this.mood = '满足';
             this.expression = '看完医生，身体舒服多了！';
             this.stateDesc = '看完病了，感觉好多了';
-            // 花钱看病
-            this.savings = Math.max(0, this.savings - 20);
         }
 
         this.expressionTimer = 6;
@@ -501,12 +500,8 @@
 
         const r = goal.reward;
         if (r.sanity) this.sanity = Math.min(100, this.sanity + r.sanity);
-        if (r.charisma) this.charisma = Math.min(100, this.charisma + r.charisma);
-        if (r.wisdom) this.wisdom = Math.min(100, this.wisdom + r.wisdom);
-        if (r.empathy) this.empathy = Math.min(100, this.empathy + r.empathy);
         if (r.health) this.health = Math.min(100, this.health + r.health);
         if (r.stamina) this.stamina = Math.min(100, this.stamina + r.stamina);
-        if (r.savings) this.savings += r.savings;
 
         // 完成目标时产生积极情绪
         this.mood = '满足';
@@ -823,81 +818,9 @@
         const staminaDrain = baseStaminaDrain * _diffStaminaMult;
         this.stamina = Math.max(0, this.stamina - staminaDrain * dt);
 
-        // 吃饭恢复体力【体力恢复快】
-        // 【增强】San值低时体力恢复效率降低（精神差导致食欲不振）
-        if (this.isEating) {
-            const sanRecoveryPenalty = this.sanity < 25 ? 0.5 : (this.sanity < 40 ? 0.7 : 1.0);
-            this.stamina = Math.min(100, this.stamina + 0.08 * sanRecoveryPenalty * dt);
-        }
+        // 【v2.2】吃饭恢复体力/San/健康改为吃完后一次性给（见_updateHunger吃完逻辑）
 
-        // ---- 存款变化 ----
-        // 工作日薪：每游戏小时在工作场所赚取收入（缓慢累积）
-        if (isWorking) {
-            // 店主/教师类，每游戏小时赚 2~5 元
-            // 【增强】San值/健康低时工作效率大幅降低（精神差/身体差干不动活）
-            const workEfficiency = Math.min(
-                this.sanity < 20 ? 0.3 : (this.sanity < 40 ? 0.6 : 1.0),
-                this.health < 25 ? 0.4 : (this.health < 50 ? 0.7 : 1.0)
-            );
-            const hourlyWage = (this.wisdom >= 60 ? 0.08 : 0.05) * workEfficiency;
-            this.savings += hourlyWage * dt;
-        }
-// 退休金（老钱等无工作场所的成年人）
-        if (!this.workplaceName && this.age >= 55) {
-            this.savings += 0.02 * dt; // 退休金缓慢累积
-        }
-        // 吃饭扣钱（在餐饮场所吃饭时）
-        if (this.isEating && this.currentScene !== this.homeName) {
-            // 每次吃饭花费约 8~15 元，分散在吃饭时间(20s)内扣除
-            // 0.5 * dt * 20s ≈ 10元一顿饭
-            this.savings = Math.max(0, this.savings - 0.5 * dt);
-            // 大厨在酒馆有客人吃饭时获得餐饮收入
-        if (this.currentScene === 'kitchen') {
-                const chef = game.npcs.find(n => n.id === 'li_shen');
-                if (chef && chef.id !== this.id) {
-                    chef.savings += 0.4 * dt; // 烊事长从每位就餐人员获得贡献点
-                }
-            }
-        }
-
-        // ---- 魅力变化【变化慢】----
-        // 社交中缓慢提升
-        if (this.state === 'CHATTING') {
-            // 【增强】San值低时社交质量下降，魅力提升减半
-            const socialQuality = this.sanity < 30 ? 0.5 : 1.0;
-            this.charisma = Math.min(100, this.charisma + 0.005 * socialQuality * dt);
-        }
-        // 长期不社交缓慢下降（由 think() 后的事件驱动处理，这里不做连续扣减）
-        // 生病时魅力下降
-        if (this.isSick) {
-            this.charisma = Math.max(0, this.charisma - 0.005 * dt);
-        }
-        // 【增强】San值低时魅力持续下降（精神萎靡、形象邋遢）
-        if (this.sanity < 30) {
-            this.charisma = Math.max(0, this.charisma - 0.008 * dt);
-        }
-        // 【增强】健康低时魅力下降（面色苍白、精神不振）
-        if (this.health < 35) {
-            this.charisma = Math.max(0, this.charisma - 0.006 * dt);
-        }
-        // 存款高时维护形象
-        if (this.savings >= 200) {
-            this.charisma = Math.min(100, this.charisma + 0.002 * dt);
-        }
-        // 体力过低时魅力下降
-        if (this.stamina < 20) {
-            this.charisma = Math.max(0, this.charisma - 0.005 * dt);
-        }
-
-        // ---- 智慧变化【变化慢】----
-        // 在工坊工作/学习缓慢提升
-        if (this.currentScene === 'workshop') {
-            this.wisdom = Math.min(100, this.wisdom + 0.004 * dt);
-        }
-        // 在医疗站学习医术（苏医生的学徒等）
-        if (this.currentScene === 'medical') {
-            this.wisdom = Math.min(100, this.wisdom + 0.002 * dt);
-        }
+        // 【v2.2】已删除：存款/魅力/智慧/情商变化（v1.0遗留，末日生存不需要）
 
         // ---- 健康变化【变化慢】----
         // ============ 【任务6】生命系统升级：饥饿/体力→健康→死亡链路 ============
@@ -936,10 +859,7 @@
         if (this.stamina < 10) {
             this.health = Math.max(0, this.health - 0.02 * dt);
         }
-        // 吃饭恢复健康
-        if (this.isEating) {
-            this.health = Math.min(100, this.health + 0.01 * dt);
-        }
+        // 【v2.2】吃饭恢复健康改为吃完后一次性给（见_updateHunger吃完逻辑）
         // 淋雨伤害健康
         if (this.currentScene === 'village' && game.isRaining() && !this.hasUmbrella) {
             this.health = Math.max(0, this.health - 0.03 * dt);
@@ -979,17 +899,7 @@
             this._nightSanLogged = false;
         }
 
-        // ---- 情商变化【变化慢】----
-        // 社交中缓慢提升
-        if (this.state === 'CHATTING') {
-            // 【增强】San值低时社交质量下降，情商提升减半
-            const socialQualityEmp = this.sanity < 30 ? 0.5 : 1.0;
-            this.empathy = Math.min(100, this.empathy + 0.004 * socialQualityEmp * dt);
-        }
-        // 【增强】San值极低时情商持续下降（情绪失控、说话伤人）
-        if (this.sanity < 25) {
-            this.empathy = Math.max(0, this.empathy - 0.006 * dt);
-        }
+        // 【v2.2】已删除：情商变化（v1.0遗留，末日生存不需要）
 
         // ---- San值变化【变化快】----
         // debug模式下San值下降加速，方便测试低San值效果
@@ -1022,11 +932,7 @@
             this.sanity = Math.max(0, this.sanity - healthSanDrain);
             sanSources.push(`健康差-${healthSanDrain.toFixed(2)}`);
         }
-        // 吃饭恢复San值
-        if (this.isEating) {
-            this.sanity = Math.min(100, this.sanity + 0.06 * dt);
-            sanSources.push(`吃饭+${(0.06 * dt).toFixed(2)}`);
-        }
+        // 【v2.2】吃饭恢复San改为吃完后一次性给（见_updateHunger吃完逻辑）
         // 在公园/广场散步恢复San值
         if (this.currentScene === 'village' && !isWorking) {
             this.sanity = Math.min(100, this.sanity + 0.02 * dt);
@@ -1062,12 +968,8 @@
             this.isWatchingShow = true;
             this.sanity = Math.min(100, this.sanity + 0.20 * dt);  // 看演出大幅恢复San值
             sanSources.push(`看演出+${(0.20 * dt).toFixed(2)}`);
-            if (this.savings >= 2) {
-                this.savings -= 0.05 * dt; // 看演出少量花钱（约1元/次）
-            }
-            // 歆玥获得演出收入
+            // 歆玥获得演出收入（v2.2已移除存款系统）
             if (linYue) {
-                linYue.savings += 0.04 * dt;
                 // 【目标追踪】标记歆玥正在演出（每场演出只计一次）
                 if (!linYue._performanceTrackedThisSlot) {
                     linYue._performanceTrackedThisSlot = true;
@@ -1097,9 +999,6 @@
             this.isInTherapy = true;
             this.sanity = Math.min(100, this.sanity + 0.30 * dt);  // 心理咨询大幅恢复San值
             sanSources.push(`心理咨询+${(0.30 * dt).toFixed(2)}`);
-            this.savings -= 0.3 * dt;  // 大量花钱（约6元/次）
-            // 苏医生获得咨询收入
-            suDoctor.savings += 0.25 * dt;
         } else if (this.id !== 'su_doctor' && this.currentScene === 'medical' && suDoctorAvailable) {
             // 碰巧在医疗站但没有正式咨询——微量恢复（安心氛围）
             this.isInTherapy = false;
@@ -1178,8 +1077,6 @@
             this.crazyTimer -= dt;
             this.stamina = Math.max(0, this.stamina - 0.08 * dt); // 发疯大幅消耗体力
             this.health = Math.max(0, this.health - 0.03 * dt);   // 发疯大幅伤害健康
-            this.charisma = Math.max(0, this.charisma - 0.02 * dt); // 发疯降低魅力（形象变差）
-            this.empathy = Math.max(0, this.empathy - 0.01 * dt);  // 发疯降低情商（胡言乱语）
 
             // 【极寒生存】San<10 精神崩溃物理攻击：随机攻击附近NPC
             if (this.sanity < 10 && Math.random() < 0.005 * dt) {
@@ -1375,11 +1272,10 @@
                 }
             }
         }
-        // 生病中：持续消耗体力和魅力，计时
+        // 生病中：持续消耗体力，计时
         if (this.isSick) {
             this.sickTimer -= dt;
             this.stamina = Math.max(0, this.stamina - 0.02 * dt);
-            this.charisma = Math.max(0, this.charisma - 0.005 * dt);
             // 如果看病（到医疗站治疗，简化为：在医疗站内）
             if (this.currentScene === 'medical') {
                 this.health = Math.min(100, this.health + 0.1 * dt); // 加速恢复
@@ -1433,11 +1329,7 @@
 
         // ---- 属性边界钳制 ----
         this.stamina = Math.max(0, Math.min(100, this.stamina));
-        this.charisma = Math.max(0, Math.min(100, this.charisma));
-        this.wisdom = Math.max(0, Math.min(100, this.wisdom));
         this.health = Math.max(0, Math.min(100, this.health));
-        this.empathy = Math.max(0, Math.min(100, this.empathy));
-        this.savings = Math.max(0, this.savings);
         this.bodyTemp = Math.max(25, Math.min(36.5, this.bodyTemp));
         this.sanity = Math.max(0, Math.min(100, this.sanity));
 
@@ -1713,18 +1605,6 @@
                 case 'performCount':
                     currentValue = this._goalTrackers.performCount;
                     break;
-                case 'savings':
-                    currentValue = this.savings;
-                    break;
-                case 'wisdom':
-                    currentValue = this.wisdom;
-                    break;
-                case 'charisma':
-                    currentValue = this.charisma;
-                    break;
-                case 'empathy':
-                    currentValue = this.empathy;
-                    break;
                 case 'health':
                     currentValue = this.health;
                     break;
@@ -1846,44 +1726,46 @@
             if (this.eatingTimer <= 0) {
                 this.isEating = false;
                 
-                // 【关键修复】吃饭时实际消耗食物存储！
+                // 【v2.1】个人进食：消耗食物并恢复饱腹（食物消耗不受天气影响）
                 const rs2 = game.resourceSystem;
-                // 应用天气食物消耗乘数：寒冷天气下每餐消耗更多食物
-                const baseFoodPerMeal = 1.5; // 基础每人每餐消耗1.5单位食物
-                const weatherFoodMult = (rs2 && rs2._weatherConsumptionMult) ? (rs2._weatherConsumptionMult.food || 1.0) : 1.0;
-                const foodPerMeal = baseFoodPerMeal * weatherFoodMult;
-                if (rs2) {
-                    if (rs2.food >= foodPerMeal) {
-                        rs2.consumeResource('food', foodPerMeal, `${this.name}吃饭`);
-                        this.hunger = Math.min(100, this.hunger + 60); // 吃饱了
-                        this.mood = '满足';
-                        this.expression = '吃饱了，真舒服！';
-                        if (game.addEvent) {
-                            const multInfo = weatherFoodMult > 1.0 ? `(寒冷×${weatherFoodMult.toFixed(1)})` : '';
-                            game.addEvent(`🍴 ${this.name} 吃饱了（-${foodPerMeal.toFixed(1)}食物${multInfo}，剩余${Math.round(rs2.food)}，饱食度: ${Math.round(this.hunger)}）`);
-                        }
-                    } else if (rs2.food > 0) {
-                        // 食物不足，按比例恢复
-                        const available = rs2.food;
-                        const ratio = available / foodPerMeal;
-                        rs2.consumeResource('food', available, `${this.name}吃饭(不足)`);
-                        this.hunger = Math.min(100, this.hunger + Math.round(60 * ratio));
-                        this.mood = '不太满足';
-                        this.expression = '只吃了一点点...';
-                        if (game.addEvent) {
-                            game.addEvent(`⚠️ ${this.name} 吃了一点但食物不够（-${Math.round(available)}食物，饱食度+${Math.round(60 * ratio)}）`);
-                        }
-                    } else {
-                        // 没有食物
-                        this.hunger = Math.max(0, this.hunger - 10); // 白跑一趟还更饿了
-                        this.mood = '沮丧';
-                        this.expression = '没有食物...';
-                        if (game.addEvent) {
-                            game.addEvent(`😰 ${this.name} 到食堂发现没有食物了！`);
-                        }
+                const foodPerMeal = 1.5; // 每人每餐固定消耗
+                if (rs2 && rs2.food >= foodPerMeal) {
+                    rs2.consumeResource('food', foodPerMeal, `${this.name}个人进食`);
+                    this.hunger = Math.min(100, this.hunger + 60);
+                    // 【v2.2】吃饭一次性恢复体力/San/健康（不再是持续恢复）
+                    const sanPenalty = this.sanity < 25 ? 0.5 : (this.sanity < 40 ? 0.7 : 1.0);
+                    this.stamina = Math.min(100, this.stamina + 15 * sanPenalty); // 体力+15（San低时打折）
+                    this.sanity = Math.min(100, this.sanity + 5);   // San+5
+                    this.health = Math.min(100, this.health + 2);   // 健康+2
+                    this.mood = '满足';
+                    this.expression = '吃饱了，真舒服！';
+                    if (game.addEvent) {
+                        game.addEvent(`🍴 ${this.name} 吃饱了（-${foodPerMeal}食物，饱食+60→${Math.round(this.hunger)}，剩余${Math.round(rs2.food)}）`);
+                    }
+                } else if (rs2 && rs2.food > 0) {
+                    // 食物不足，吃掉剩余的，按比例恢复
+                    const available = rs2.food;
+                    const ratio = available / foodPerMeal;
+                    rs2.consumeResource('food', available, `${this.name}个人进食(不足)`);
+                    this.hunger = Math.min(100, this.hunger + Math.round(60 * ratio));
+                    // 【v2.2】按比例恢复
+                    const sanPenalty2 = this.sanity < 25 ? 0.5 : (this.sanity < 40 ? 0.7 : 1.0);
+                    this.stamina = Math.min(100, this.stamina + Math.round(15 * ratio * sanPenalty2));
+                    this.sanity = Math.min(100, this.sanity + Math.round(5 * ratio));
+                    this.health = Math.min(100, this.health + Math.round(2 * ratio));
+                    this.mood = '不太满足';
+                    this.expression = '只吃了一点点...';
+                    if (game.addEvent) {
+                        game.addEvent(`⚠️ ${this.name} 食物不够（-${Math.round(available)}食物，饱食+${Math.round(60 * ratio)}）`);
                     }
                 } else {
-                    this.hunger = Math.min(100, this.hunger + 60);
+                    // 没有食物
+                    this.hunger = Math.max(0, this.hunger - 10);
+                    this.mood = '沮丧';
+                    this.expression = '没有食物...';
+                    if (game.addEvent) {
+                        game.addEvent(`😰 ${this.name} 到食堂发现没有食物了！`);
+                    }
                 }
                 
                 this.expressionTimer = 5;
@@ -2146,11 +2028,9 @@
     proto.getAttributeSummary = function() {
         return `💪体力:${Math.round(this.stamina)}(${this.getStaminaLevel()}) ` +
                `🧠San:${Math.round(this.sanity)}(${this.getSanityLevel()}) ` +
-               `💰存款:${Math.round(this.savings)}(${this.getSavingsLevel()}) ` +
-               `✨魅力:${Math.round(this.charisma)}(${this.getCharismaLevel()}) ` +
-               `🧠智慧:${Math.round(this.wisdom)}(${this.getWisdomLevel()}) ` +
                `🫀健康:${Math.round(this.health)}(${this.getHealthLevel()}) ` +
-               `💬情商:${Math.round(this.empathy)}(${this.getEmpathyLevel()})`;
+               `🍖饱腹:${Math.round(this.hunger)}(${this.getHungerStatus()}) ` +
+               `🌡️体温:${this.bodyTemp.toFixed(1)}°C(${this.getBodyTempStatus()})`;
     }
 
     // ============ 行动实效性系统 ============
@@ -2178,21 +2058,7 @@
 
     /** 获取体温颜色 (绿→黄→红→紫) */;
 
-    proto.getCharismaLevel = function() {
-        if (this.charisma >= 80) return '万人迷';
-        if (this.charisma >= 60) return '有亲和力';
-        if (this.charisma >= 40) return '普通';
-        if (this.charisma >= 20) return '不讨喜';
-        return '社交障碍';
-    };
-
-    proto.getEmpathyLevel = function() {
-        if (this.empathy >= 80) return '知心人';
-        if (this.empathy >= 60) return '善解人意';
-        if (this.empathy >= 40) return '普通';
-        if (this.empathy >= 20) return '木讷';
-        return '低情商';
-    };
+    // 【v2.2】已删除getCharismaLevel和getEmpathyLevel（废弃属性）
 
     proto.getGoalsSummary = function() {
         if (!this.goals || this.goals.length === 0) return '';
@@ -2246,13 +2112,7 @@
 
     /** 获取全部属性概览（用于Prompt注入） */;
 
-    proto.getSavingsLevel = function() {
-        if (this.savings >= 500) return '富裕';
-        if (this.savings >= 200) return '小康';
-        if (this.savings >= 50) return '拮据';
-        if (this.savings >= 1) return '贫困';
-        return '破产';
-    };
+    // 【v2.2】已删除getSavingsLevel（废弃属性）
 
     proto.getStaminaLevel = function() {
         if (this.stamina >= 80) return '精力充沛';
@@ -2262,43 +2122,25 @@
         return '倒下';
     };
 
-    proto.getWisdomLevel = function() {
-        if (this.wisdom >= 80) return '睿智';
-        if (this.wisdom >= 60) return '聪明';
-        if (this.wisdom >= 40) return '正常';
-        if (this.wisdom >= 20) return '迟钝';
-        return '懵懂';
-    };
+    // 【v2.2】已删除getWisdomLevel（废弃属性）
 
     proto.onChatCompleted = function(partner, quality) {
         // quality: 'good' | 'normal' | 'bad'
-        if (quality === 'good') {
-            this.charisma = Math.min(100, this.charisma + 1);
-            this.empathy = Math.min(100, this.empathy + 0.5);
-        } else if (quality === 'bad') {
-            this.charisma = Math.max(0, this.charisma - 2);
-            this.empathy = Math.max(0, this.empathy - 1);
-        }
         // 社交消耗体力
         this.stamina = Math.max(0, this.stamina - 1);
     };
 
     proto.onConflict = function() {
-        this.charisma = Math.max(0, this.charisma - 3);
         this.stamina = Math.max(0, this.stamina - 5);
         this.health = Math.max(0, this.health - 2);
     };
 
     proto.onHelpOther = function() {
-        this.charisma = Math.min(100, this.charisma + 2);
-        this.empathy = Math.min(100, this.empathy + 1.5);
+        // 【v2.2】已移除charisma/empathy，帮助他人只影响好感度（由调用方处理）
     };
 
     proto.onLearnFromOther = function(teacherWisdom) {
-        // 向更聪明的人学习
-        if (teacherWisdom > this.wisdom) {
-            this.wisdom = Math.min(100, this.wisdom + 1);
-        }
+        // 【v2.2】已移除wisdom属性，保留空函数防止调用报错
     }
 
     // ============ 饥饿系统 ============

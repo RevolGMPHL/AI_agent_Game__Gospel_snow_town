@@ -174,6 +174,20 @@ window.addEventListener('load', () => {
     const btnAgent = document.getElementById('btn-mode-agent');
     const btnDebug = document.getElementById('btn-mode-debug');
     const btnReincarnation = document.getElementById('btn-mode-reincarnation');
+    const btnContinue = document.getElementById('btn-mode-continue');
+
+    // --- 检测并显示断点续玩存档 ---
+    const saveInfo = GST.Game ? GST.Game.getSaveInfo() : null;
+    if (saveInfo && btnContinue) {
+        const modeLabel = { agent: 'AI观察', reincarnation: '轮回', debug: 'Debug' };
+        const continueHint = document.getElementById('continue-save-hint');
+        if (continueHint) {
+            continueHint.textContent = `💾 第${saveInfo.day}天 ${saveInfo.timeStr} · ${saveInfo.weather} · 存活${saveInfo.aliveCount}/${saveInfo.totalCount} · ${modeLabel[saveInfo.mode] || saveInfo.mode}模式 · 保存于${saveInfo.savedAt}`;
+        }
+        btnContinue.style.display = '';
+    } else if (btnContinue) {
+        btnContinue.style.display = 'none';
+    }
 
     // --- 检测并显示轮回历史状态 ---
     try {
@@ -418,8 +432,18 @@ window.addEventListener('load', () => {
         if (isStarting) return;
         isStarting = true;
 
-        // 非轮回模式强制使用简单难度
-        if (mode !== 'reincarnation') {
+        // 断点续玩：从存档中读取真实mode
+        let isContinue = false;
+        let realMode = mode;
+        if (mode === '_continue_') {
+            isContinue = true;
+            const si = GST.Game ? GST.Game.getSaveInfo() : null;
+            realMode = (si && si.mode) ? si.mode : 'agent';
+            console.log(`[启动] 断点续玩模式，实际游戏模式: ${realMode}`);
+        }
+
+        // 非轮回模式强制使用简单难度（断点续玩不改难度）
+        if (!isContinue && realMode !== 'reincarnation') {
             GST.setDifficulty('easy');
         }
 
@@ -427,9 +451,11 @@ window.addEventListener('load', () => {
         btnAgent.disabled = true;
         btnDebug.disabled = true;
         btnReincarnation.disabled = true;
+        if (btnContinue) btnContinue.disabled = true;
         btnAgent.style.opacity = '0.5';
         btnDebug.style.opacity = '0.5';
         btnReincarnation.style.opacity = '0.5';
+        if (btnContinue) btnContinue.style.opacity = '0.5';
 
         // --- 读取外部 API 配置并保存 ---
         if (LLM.source === 'external') {
@@ -454,8 +480,8 @@ window.addEventListener('load', () => {
             // 短暂延迟让用户看到成功提示
             await new Promise(r => setTimeout(r, 600));
 
-            // 轮回模式：如果用户勾选了"从第1世重新开始"，先清除轮回数据
-            if (mode === 'reincarnation') {
+            // 轮回模式：如果用户勾选了"从第1世重新开始"，先清除轮回数据（断点续玩不处理）
+            if (realMode === 'reincarnation' && !isContinue) {
                 const chkReset = document.getElementById('chk-reset-reincarnation');
                 if (chkReset && chkReset.checked) {
                     try {
@@ -473,14 +499,57 @@ window.addEventListener('load', () => {
             }
 
             overlay.style.display = 'none';
-            document.getElementById('app-layout').style.display = 'flex';
-            window.game = new GST.Game(mode);
 
-            // 异步加载图片素材（不阻塞游戏启动，加载完毕后自动切换到图片绘制）
+            // ====== 先加载素材，再进入游戏 ======
+            const loadingOverlay = document.getElementById('asset-loading-overlay');
+            const loadingBarFill = document.getElementById('loading-bar-fill');
+            const loadingStatusText = document.getElementById('loading-status-text');
+
             if (typeof SpriteLoader !== 'undefined') {
-                SpriteLoader.load().then(ok => {
-                    if (ok) console.log('[Game] 图片素材加载完成，已切换到图片绘制模式');
-                });
+                // 显示素材加载界面
+                loadingOverlay.style.display = 'flex';
+
+                // 启动进度轮询
+                const progressTimer = setInterval(() => {
+                    const progress = SpriteLoader.progress;
+                    const pct = Math.round(progress * 100);
+                    if (loadingBarFill) loadingBarFill.style.width = pct + '%';
+                    if (loadingStatusText) loadingStatusText.textContent = `加载素材中... ${pct}%`;
+                }, 100);
+
+                // 等待素材加载完成
+                const loadOk = await SpriteLoader.load();
+                clearInterval(progressTimer);
+
+                // 加载完毕，更新UI
+                if (loadingBarFill) loadingBarFill.style.width = '100%';
+                if (loadingStatusText) {
+                    loadingStatusText.textContent = loadOk ? '✅ 素材加载完成，正在启动...' : '⚠️ 部分素材加载失败，使用备用绘制...';
+                }
+                if (loadOk) console.log('[启动] 图片素材加载完成');
+
+                // 短暂展示完成状态
+                await new Promise(r => setTimeout(r, 500));
+
+                // 隐藏加载界面，启动游戏
+                loadingOverlay.style.display = 'none';
+            }
+
+            document.getElementById('app-layout').style.display = 'flex';
+            window.game = new GST.Game(realMode);
+
+            // 断点续玩：如果是continue模式，创建游戏后加载存档
+            if (isContinue) {
+                const loaded = window.game.load();
+                if (loaded) {
+                    console.log('[启动] 断点续玩：存档加载成功');
+                    window.game.addEvent('💾 断点续玩：从存档恢复');
+                    // 同步UI
+                    window.game._updateReincarnationUI();
+                    window.game._updateSidebar();
+                } else {
+                    console.warn('[启动] 断点续玩：存档加载失败，从头开始');
+                }
             }
 
             // ============ 调试命令 ============
@@ -497,7 +566,7 @@ window.addEventListener('load', () => {
                 // 1. 检查当前资源状态
                 const rs = g.resourceSystem;
                 if (rs) {
-                    console.log(`[资源] 木柴:${Math.round(rs.woodFuel)} 食物:${Math.round(rs.food)} 电力:${Math.round(rs.power)} 建材:${Math.round(rs.material)}`);
+        console.log(`[资源] 木柴:${Math.round(rs.woodFuel)} 食物:${Math.round(rs.food)} 电力:${Math.round(rs.power)}`);
                     const urg = rs.getResourceUrgency();
                     console.log(`[紧急度] 木柴:${urg.wood} 食物:${urg.food} 电力:${urg.power}`);
                 }
@@ -540,7 +609,7 @@ window.addEventListener('load', () => {
                 
                 console.log(`[debugTeleport] 传送 ${npcName} 到 ${areaKey} (${target.x},${target.y})`);
                 npc._teleportTo('village', target.x, target.y);
-                npc.activateTaskOverride(`debug_${areaKey}`, areaKey, 'urgent', areaKey === 'lumber_camp' ? 'woodFuel' : areaKey === 'frozen_lake' ? 'food' : areaKey === 'ore_pile' ? 'power' : 'material');
+npc.activateTaskOverride(`debug_${areaKey}`, areaKey, 'urgent', areaKey === 'lumber_camp' ? 'woodFuel' : areaKey === 'frozen_lake' ? 'food' : areaKey === 'ore_pile' ? 'power' : 'explore');
                 
                 const gatherArea = g.taskSystem ? g.taskSystem._detectGatherArea(npc) : null;
                 console.log(`[验证] ${npcName} 现在在 ${gatherArea || '未检测到'} 采集区`);
@@ -551,10 +620,24 @@ window.addEventListener('load', () => {
             btnAgent.disabled = false;
             btnDebug.disabled = false;
             btnReincarnation.disabled = false;
+            if (btnContinue) btnContinue.disabled = false;
             btnAgent.style.opacity = '1';
             btnDebug.style.opacity = '1';
             btnReincarnation.style.opacity = '1';
+            if (btnContinue) btnContinue.style.opacity = '1';
         }
+    }
+
+    // --- 继续游戏按钮 ---
+    if (btnContinue) {
+        btnContinue.addEventListener('click', () => {
+            // 继续游戏使用存档中的模式，但startGame需要一个有效的mode来创建Game实例
+            // 使用特殊标记'_continue_'，在创建Game后调用load()覆盖状态
+            const si = GST.Game ? GST.Game.getSaveInfo() : null;
+            const savedMode = si ? si.mode : 'agent';
+            // 用存档中记录的真实mode创建Game，然后load()覆盖状态
+            startGame('_continue_');
+        });
     }
 
     // --- 所有模式的难度保存 ---

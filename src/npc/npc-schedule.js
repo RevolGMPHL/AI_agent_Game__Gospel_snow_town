@@ -892,6 +892,32 @@
      * 当_taskOverride.isActive时由_updateSchedule的P1层调用
      */;
 
+    /**
+     * 获取NPC专属床位坐标
+     * 从日程表中找到包含 _bed_ 的 STAY 条目，返回对应的 SCHEDULE_LOCATIONS 坐标
+     * @returns {{ x: number, y: number, scene: string }|null}
+     */;
+    proto._getBedLocation = function() {
+        // 优先从日程模板中找到床位target
+        const sched = this.scheduleTemplate;
+        if (sched) {
+            for (const s of sched) {
+                if (s.action === 'STAY' && s.target && s.target.includes('_bed_')) {
+                    const loc = GST.SCHEDULE_LOCATIONS[s.target];
+                    if (loc) return loc;
+                }
+            }
+        }
+        // 兜底：尝试通过dorm地图的getRoomForNPC方法
+        const dormMap = this.game && this.game.mapRegistry && this.game.mapRegistry.maps[this.homeName];
+        if (dormMap && dormMap.getRoomForNPC) {
+            const room = dormMap.getRoomForNPC(this.name);
+            if (room) return { x: room.x, y: room.y, scene: this.homeName };
+        }
+        // 最后兜底：_inside位置
+        return GST.SCHEDULE_LOCATIONS[this.homeName + '_inside'] || null;
+    }
+
     proto._updateSleepState = function(game) {
         const hour = game.getHour();
         
@@ -981,11 +1007,12 @@
                 }
                 return; // 不入睡
             }
-            // 【修复】入睡时强制修正坐标到床位位置
-            const bedLoc = GST.SCHEDULE_LOCATIONS[this.homeName + '_inside'];
+            // 【修复】入睡时强制修正坐标到NPC专属床位位置（而非房间中央_inside）
+            const bedLoc = this._getBedLocation();
             if (bedLoc) {
                 this.x = bedLoc.x * GST.TILE;
                 this.y = bedLoc.y * GST.TILE;
+                this._logDebug('sleep', `入睡传送到床位(${bedLoc.x},${bedLoc.y})`);
             }
             this.isSleeping = true;
             this.state = 'SLEEPING';
@@ -1099,7 +1126,7 @@
                 const fallbackMap = {
                     woodFuel: 'lumber_camp',
                     food: 'frozen_lake',
-                    material: 'ruins_site',
+                    explore: 'ruins_site',
                     power: 'workshop_door'
                 };
                 const fallbackKey = (override.resourceType && fallbackMap[override.resourceType]) || 'furnace_plaza';
@@ -1295,7 +1322,7 @@
                 const fallbackMap = {
                     woodFuel: 'lumber_camp',
                     food: 'frozen_lake',
-                    material: 'ruins_site',
+                    explore: 'ruins_site',
                     power: 'workshop_door'
                 };
                 const fallback = (resourceType && fallbackMap[resourceType]) || 'furnace_plaza';
@@ -1328,7 +1355,7 @@
         this.scheduleReached = false;
 
         // 设置具体的状态描述
-        const resourceNames = { woodFuel: '砍柴', food: '采集食物', material: '采集建材', power: '维护电力' };
+        const resourceNames = { woodFuel: '砍柴', food: '采集食物', explore: '探索废墟', power: '维护电力' };
         const actionName = (resourceType && resourceNames[resourceType]) || '执行任务';
         this.stateDesc = priority === 'urgent' ? `紧急前往${actionName}` : `前往${actionName}`;
 

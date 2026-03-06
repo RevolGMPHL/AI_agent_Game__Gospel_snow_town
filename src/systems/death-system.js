@@ -525,7 +525,9 @@ class DeathSystem {
         const hour = this.game.getHour();
 
         // 第4天18:00触发结局
-        if (dayCount >= 4 && hour >= 18) {
+        // 【修复】增加兜底：第5天及以后任何时刻都强制触发结局
+        // 防止跳夜从第4天晚上直接跳到第5天早上，错过18:00检测窗口
+        if ((dayCount === 4 && hour >= 18) || dayCount >= 5) {
             this._triggerEnding();
         }
     }
@@ -564,8 +566,8 @@ class DeathSystem {
             const rs = this.game.resourceSystem;
             if (rs) {
                 const tc = rs.totalConsumed || {};
-                endingLog += `  最终资源: 木柴:${rs.woodFuel != null ? rs.woodFuel.toFixed(1) : '?'} 食物:${rs.food != null ? rs.food.toFixed(1) : '?'} 电力:${rs.power != null ? rs.power.toFixed(1) : '?'} 建材:${rs.material != null ? rs.material.toFixed(1) : '?'}\n`;
-                endingLog += `  总消耗: 木柴:${(tc.woodFuel || 0).toFixed(1)} 食物:${(tc.food || 0).toFixed(1)} 电力:${(tc.power || 0).toFixed(1)} 建材:${(tc.material || 0).toFixed(1)}\n`;
+                endingLog += `  最终资源: 木柴:${rs.woodFuel != null ? rs.woodFuel.toFixed(1) : '?'} 食物:${rs.food != null ? rs.food.toFixed(1) : '?'} 电力:${rs.power != null ? rs.power.toFixed(1) : '?'}\n`;
+                endingLog += `  总消耗: 木柴:${(tc.woodFuel || 0).toFixed(1)} 食物:${(tc.food || 0).toFixed(1)} 电力:${(tc.power || 0).toFixed(1)}\n`;
             }
             // 关键事件时间线
             if (this.timeline && this.timeline.length > 0) {
@@ -816,10 +818,10 @@ class DeathSystem {
                             <div style="font-size:11px; color:#666;">总消耗: ${Math.round(resSys.totalConsumed.power)}</div>
                         </div>
                         <div style="background:rgba(255,255,255,0.05); border-radius:8px; padding:12px;">
-                            <div style="font-size:24px;">🧱</div>
-                            <div style="font-size:20px; color:#a78bfa; font-weight:bold;">${Math.round(resSys.material)}</div>
-                            <div style="font-size:11px; color:#888;">建材剩余</div>
-                            <div style="font-size:11px; color:#666;">总消耗: ${Math.round(resSys.totalConsumed.material)}</div>
+                            <div style="font-size:24px;">🔍</div>
+                            <div style="font-size:20px; color:#a78bfa; font-weight:bold;">${resSys.ruinsExploresToday || 0}</div>
+                            <div style="font-size:11px; color:#888;">今日废墟探索次数</div>
+                            <div style="font-size:11px; color:#666;">每天限3次</div>
                         </div>
                     </div>
                 </div>

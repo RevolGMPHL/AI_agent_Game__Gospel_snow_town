@@ -211,8 +211,8 @@
         spriteDir: 'asset/character/陆辰',
         attrs: { stamina: 95, health: 95, wisdom: 50, charisma: 65, empathy: 25, sanity: 60, savings: 0 },
         specialties: {
-            gathering_material: 1.5, // 建材采集×1.5
             gathering_food: 1.3,     // 食物采集×1.3
+            gathering_wood: 1.3,     // 木柴采集×1.3
             construction: 1.3,       // 建造×1.3
             cold_resist: 0.7,        // 耐寒：体温下降速度×0.7
         },
@@ -222,7 +222,7 @@
               reward: { sanity: 30 }, rewardDesc: 'San+30' },
             { id: 'daily_meal', desc: '今天至少吃到1餐', type: 'daily', targetKey: 'mealsToday', targetValue: 1,
               reward: { sanity: 5 }, rewardDesc: 'San+5' },
-            { id: 'gather_material', desc: '采集建材够建第二暖炉', type: 'long_term', targetKey: 'materialForFurnace2', targetValue: 1,
+            { id: 'gather_explore', desc: '探索废墟找到有用物资', type: 'daily', targetKey: 'ruinsExploreCount', targetValue: 1,
               reward: { sanity: 20, stamina: 5 }, rewardDesc: 'San+20, 体力+5' },
             { id: 'daily_gather', desc: '今天采集足够物资', type: 'daily', targetKey: 'gatherCount', targetValue: 10,
               reward: { sanity: 8, empathy: 1 }, rewardDesc: 'San+8, 情商+1' },
@@ -230,8 +230,8 @@
         schedule: [
             { start: 6,  end: 7,  action: 'WALK_TO', target: 'kitchen_door',  desc: '起床去吃早餐' },
             { start: 7,  end: 8,  action: 'WALK_TO', target: 'warehouse_door', desc: '去仓库领取采集工具' },
-            { start: 8,  end: 12, action: 'WALK_TO', target: 'ruins_site',    desc: '出北门去废墟采集建材' },
-            { start: 12, end: 13, action: 'WALK_TO', target: 'warehouse_door', desc: '搬运建材回仓库、吃午饭' },
+            { start: 8,  end: 12, action: 'WALK_TO', target: 'lumber_camp',   desc: '出北门去伐木场砍柴' },
+            { start: 12, end: 13, action: 'WALK_TO', target: 'warehouse_door', desc: '搬运木柴回仓库、吃午饭' },
             { start: 13, end: 17, action: 'WALK_TO', target: 'frozen_lake',   desc: '下午去冰湖捕鱼获取食物' },
             { start: 17, end: 18, action: 'WALK_TO', target: 'warehouse_door', desc: '把食物送回仓库' },
             { start: 18, end: 19, action: 'WALK_TO', target: 'kitchen_door',  desc: '去炊事房吃晚饭' },
@@ -312,14 +312,14 @@
         schedule: [
             { start: 6,  end: 7,  action: 'WALK_TO', target: 'kitchen_door',  desc: '起床去吃早餐' },
             { start: 7,  end: 8,  action: 'WALK_TO', target: 'medical_door',  desc: '去医疗站准备草药材料' },
-            { start: 8,  end: 12, action: 'STAY',    target: 'medical_inside', desc: '在医疗站制作草药制剂和急救包' },
+            { start: 8,  end: 12, action: 'STAY',    target: 'medical_inside', desc: '在医疗站医疗救治和制作急救包' },
             { start: 12, end: 13, action: 'WALK_TO', target: 'kitchen_door',  desc: '去炊事房吃午饭' },
             { start: 13, end: 15, action: 'WALK_TO', target: 'south_gate',    desc: '去南门外布置警报陷阱' },
             { start: 15, end: 17, action: 'STAY',    target: 'workshop_inside', desc: '在工坊修理无线电台' },
-            { start: 17, end: 18, action: 'WALK_TO', target: 'medical_door',  desc: '回医疗站整理制好的药品' },
+            { start: 17, end: 18, action: 'WALK_TO', target: 'medical_door',  desc: '回医疗站整理制好的急救包' },
             { start: 18, end: 19, action: 'WALK_TO', target: 'kitchen_door',  desc: '去炊事房吃晚饭' },
             { start: 19, end: 22, action: 'STAY',    target: 'workshop_inside', desc: '夜间继续修理无线电、制作陷阱' },
-            { start: 22, end: 24, action: 'STAY',    target: 'medical_inside', desc: '深夜在医疗站继续制药' },
+            { start: 22, end: 24, action: 'STAY',    target: 'medical_inside', desc: '深夜在医疗站继续制作急救包' },
             { start: 0,  end: 6,  action: 'STAY',    target: 'dorm_b_bed_2',  desc: '在宿舍B休息睡觉' },
         ],
     },

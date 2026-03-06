@@ -15,7 +15,7 @@
                 { x: 1, y: 1, w: 3, h: 2, color: GST.C.TABLE,   name: '工作台' },
                 { x: 5, y: 1, w: 3, h: 2, color: '#606060', name: '发电机' },
                 { x: 9, y: 1, w: 2, h: 3, color: GST.C.SHELF,   name: '工具架' },
-                { x: 1, y: 4, w: 3, h: 2, color: '#7A7A7A', name: '建材堆' },
+            { x: 1, y: 4, w: 3, h: 2, color: '#7A7A7A', name: '备件堆' },
                 { x: 5, y: 4, w: 3, h: 2, color: '#5A6A5A', name: '无线电台' },
             ];
         }
@@ -71,7 +71,7 @@
     
         describe(gx, gy) {
             const others = this._getOtherPeopleHere();
-            let desc = '你在工坊里。这里有工作台、发电机、工具架和建材堆。';
+        let desc = '你在工坊里。这里有工作台、发电机、工具架和备件堆。';
             if (this.radioRepaired) desc += '无线电台已经修好了，绿灯闪烁着。';
             else desc += '角落的无线电台还在等待修理，红灯警示着故障状态。';
             if (others.length > 0) desc += `工坊里有${others.join('、')}。`;

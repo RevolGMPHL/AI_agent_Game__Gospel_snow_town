@@ -152,6 +152,9 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             delete this._pendingWorkPlanEvent;
         }
 
+        // 向右侧「决策动态」面板写入第1天分工方案卡片
+        this._addWorkPlanCardToDecisionPanel();
+
         // 设置输入
         this._setupInput();
         this._setupControls();
@@ -231,7 +234,22 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
             const lifeNum = this.reincarnationSystem.getLifeNumber();
             console.log(`[WorkPlan] 第${lifeNum}世分工方案已存储到${holder.name}`);
             // 延迟添加事件，因为构造函数中 eventLog 可能尚未初始化
-            this._pendingWorkPlanEvent = `📋 ${holder.name}制定了第${lifeNum}世分工方案: ${workPlan.workPlanSummary}`;
+            // 构建详细的分工方案日志
+            const strategyLabel = workPlan.strategy || '默认';
+            let detailLog = `\n📋━━━ 第${lifeNum}世·${holder.name}的分工方案（策略:${strategyLabel}）━━━\n`;
+            detailLog += `${workPlan.summary || workPlan.workPlanSummary}\n`;
+            // 显示第1天的分工详情
+            if (workPlan.dayPlans && workPlan.dayPlans[1]) {
+                const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
+                const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', MAINTAIN_FURNACE: '维护暖炉', MAINTAIN_ORDER: '维持秩序', REST_RECOVER: '休息' };
+                for (const a of workPlan.dayPlans[1]) {
+                    const name = nameMap[a.npcId] || a.npcId;
+                    const task = taskShort[a.task] || a.task;
+                    detailLog += `  ${name}→${task}${a.reason ? '(' + a.reason + ')' : ''}\n`;
+                }
+            }
+            detailLog += `📋━━━ 方案已下达，各人按此执行 ━━━`;
+            this._pendingWorkPlanEvent = detailLog;
         }
 
         // 日志输出
@@ -240,6 +258,46 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
             const npcCounts = days.map(d => workPlan.dayPlans[d].length);
             console.log(`[WorkPlan] 第${this.reincarnationSystem.getLifeNumber()}世分工方案生成完毕: { ${days.map((d, i) => `day${d}: ${npcCounts[i]}人`).join(', ')} }`);
         }
+    }
+
+    // ---- 向决策面板写入分工方案卡片 ----
+
+    _addWorkPlanCardToDecisionPanel() {
+        if (!this.reincarnationSystem) return;
+        const holder = this.reincarnationSystem.getWorkPlanHolder();
+        if (!holder || !holder.workPlan) return;
+
+        const chatLogEl = document.getElementById('chat-log-content');
+        if (!chatLogEl) return;
+
+        const workPlan = holder.workPlan;
+        const lifeNum = this.reincarnationSystem.getLifeNumber();
+        const strategyLabel = workPlan.strategy || '默认';
+        const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
+        const roleEmoji = { zhao_chef: '👨‍🍳', lu_chen: '💪', li_shen: '👩‍🍳', wang_teacher: '👨‍🏫', old_qian: '👴', su_doctor: '👨‍⚕️', ling_yue: '🔍', qing_xuan: '🧪' };
+        const taskShort = { COLLECT_WOOD: '🪓 收集木柴', COLLECT_FOOD: '🍞 收集食物', COLLECT_MATERIAL: '🔍 探索废墟', MAINTAIN_POWER: '⚡ 维护电力', COORDINATE: '📢 维持秩序', PREPARE_MEDICAL: '💊 医疗救治', SCOUT_RUINS: '🗺️ 鼓舞士气', BOOST_MORALE: '🎵 鼓舞士气', BUILD_FURNACE: '🔥 建暖炉', MAINTAIN_FURNACE: '🔥 维护暖炉', MAINTAIN_ORDER: '🛡️ 维持秩序', DISTRIBUTE_FOOD: '🍳 分配食物', REST_RECOVER: '💤 休息', REPAIR_RADIO: '📻 修电台', SET_TRAP: '🪤 设陷阱' };
+
+        let planHTML = `<div class="decision-card" style="border-left:3px solid #c084fc; margin:8px 4px; padding:10px 12px; background:linear-gradient(135deg, rgba(55,30,100,0.85), rgba(30,20,60,0.85)); border-radius:8px; font-size:12px; line-height:1.7;">`;
+        planHTML += `<div style="font-weight:bold; color:#e9d5ff; font-size:14px; margin-bottom:6px;">📋 第${lifeNum}世 · 第1天分工方案</div>`;
+        planHTML += `<div style="color:#a78bfa; font-size:11px; margin-bottom:6px;">策略: ${strategyLabel} · ${workPlan.summary || ''}</div>`;
+
+        const day1 = workPlan.dayPlans && workPlan.dayPlans[1];
+        if (day1) {
+            for (const a of day1) {
+                const name = nameMap[a.npcId] || a.npcId;
+                const em = roleEmoji[a.npcId] || '👤';
+                const task = taskShort[a.task] || a.task;
+                const npc = this.npcs.find(n => n.id === a.npcId);
+                const stBar = npc ? `<span style="color:#6b7280; font-size:10px; margin-left:4px;">体力${Math.round(npc.stamina)}</span>` : '';
+                planHTML += `<div style="color:#e2e8f0; padding:1px 0;">${em} <b>${name}</b>：${task}${stBar}</div>`;
+            }
+        }
+        planHTML += `</div>`;
+
+        const planCard = document.createElement('div');
+        planCard.innerHTML = planHTML;
+        chatLogEl.appendChild(planCard.firstElementChild);
+        chatLogEl.scrollTop = chatLogEl.scrollHeight;
     }
 
     // ---- NPC 初始化 ----
@@ -1067,6 +1125,9 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
         // 已经跳过了今晚，不再重复
         if (this._nightSkipDone) return;
 
+        // 【修复】第4天及以后禁止跳夜，必须让时间正常走到18:00触发结局
+        if (this.dayCount >= 4) return;
+
         const hour = this.getHour();
         // 放宽检测时段：20:00~05:59（NPC可能因体力不支在20点就开始强制入睡）
         const isNightTime = hour >= 20 || hour < 6;
@@ -1432,8 +1493,8 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             this._saveDebugLogToServer(true);
         }, 5 * 60 * 1000);
 
-        // 18. 清除旧存档
-        localStorage.removeItem('tihutown_save');
+        // 18. 立即保存新世代的初始状态（断点续玩支持：刷新后可继续）
+        this.save();
 
         // 通知
         const lifeNum = this.reincarnationSystem ? this.reincarnationSystem.getLifeNumber() : 1;
@@ -1447,13 +1508,34 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
 
     save() {
         const data = {
-            ver: 1,
+            ver: 2,
+            mode: this.mode,
             day: this.dayCount,
             time: this.gameTimeSeconds,
             scene: this.currentScene,
             weather: this.weather,
+            speedIdx: this.speedIdx,
             npcs: this.npcs.map(n => n.serialize()),
-            eventLog: this.eventLog.slice(0, 20),
+            eventLog: this.eventLog.slice(0, 30),
+            // 子系统状态
+            resourceSystem: this.resourceSystem ? this.resourceSystem.serialize() : null,
+            furnaceSystem: this.furnaceSystem ? this.furnaceSystem.serialize() : null,
+            deathSystem: this.deathSystem ? this.deathSystem.serialize() : null,
+            taskSystem: this.taskSystem ? this.taskSystem.serialize() : null,
+            eventSystem: this.eventSystem ? this.eventSystem.serialize() : null,
+            reincarnationSystem: this.reincarnationSystem ? this.reincarnationSystem.serialize() : null,
+            // 全局物品/状态
+            _medkitCount: this._medkitCount,
+            _medkitCraftProgress: this._medkitCraftProgress,
+            _radioRepairProgress: this._radioRepairProgress,
+            _radioRepaired: this._radioRepaired,
+            _radioRescueTriggered: this._radioRescueTriggered,
+            _foodWasteReduction: this._foodWasteReduction,
+            _patrolBonus: this._patrolBonus,
+            _furnaceMaintained: this._furnaceMaintained,
+            _nightSkipDone: this._nightSkipDone,
+            // 保存时间戳
+            savedAt: Date.now(),
         };
         localStorage.setItem('tihutown_save', JSON.stringify(data));
         this._showToast('💾 已保存');
@@ -1466,20 +1548,94 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
         if (!raw) return false;
         try {
             const d = JSON.parse(raw);
+            // 基本游戏状态
             this.dayCount = d.day || 1;
             this.gameTimeSeconds = d.time || 8 * 3600;
             this.currentScene = d.scene || 'village';
             this.weather = d.weather || '晴天';
+            if (d.speedIdx !== undefined) {
+                this.speedIdx = d.speedIdx;
+                const btnSpeed = document.getElementById('btn-speed');
+                if (btnSpeed) btnSpeed.textContent = `${this.speedOptions[this.speedIdx]}×`;
+            }
+            // NPC状态
             if (d.npcs) {
                 for (let i = 0; i < this.npcs.length && i < d.npcs.length; i++) {
                     this.npcs[i].deserialize(d.npcs[i]);
                 }
             }
             if (d.eventLog) this.eventLog = d.eventLog;
+            // 子系统状态恢复
+            if (d.resourceSystem && this.resourceSystem && this.resourceSystem.deserialize) {
+                this.resourceSystem.deserialize(d.resourceSystem);
+            }
+            if (d.furnaceSystem && this.furnaceSystem && this.furnaceSystem.deserialize) {
+                this.furnaceSystem.deserialize(d.furnaceSystem);
+            }
+            if (d.deathSystem && this.deathSystem && this.deathSystem.deserialize) {
+                this.deathSystem.deserialize(d.deathSystem);
+            }
+            if (d.taskSystem && this.taskSystem && this.taskSystem.deserialize) {
+                this.taskSystem.deserialize(d.taskSystem);
+            }
+            if (d.eventSystem && this.eventSystem && this.eventSystem.deserialize) {
+                this.eventSystem.deserialize(d.eventSystem);
+            }
+            if (d.reincarnationSystem && this.reincarnationSystem && this.reincarnationSystem.deserialize) {
+                this.reincarnationSystem.deserialize(d.reincarnationSystem);
+            }
+            // 全局物品/状态恢复
+            if (d._medkitCount !== undefined) this._medkitCount = d._medkitCount;
+            if (d._medkitCraftProgress !== undefined) this._medkitCraftProgress = d._medkitCraftProgress;
+            if (d._radioRepairProgress !== undefined) this._radioRepairProgress = d._radioRepairProgress;
+            if (d._radioRepaired !== undefined) this._radioRepaired = d._radioRepaired;
+            if (d._radioRescueTriggered !== undefined) this._radioRescueTriggered = d._radioRescueTriggered;
+            if (d._foodWasteReduction !== undefined) this._foodWasteReduction = d._foodWasteReduction;
+            if (d._patrolBonus !== undefined) this._patrolBonus = d._patrolBonus;
+            if (d._furnaceMaintained !== undefined) this._furnaceMaintained = d._furnaceMaintained;
+            if (d._nightSkipDone !== undefined) this._nightSkipDone = d._nightSkipDone;
+            // 同步天气系统
+            if (this.weatherSystem) {
+                this.weatherSystem.currentWeather = this.weather;
+            }
+            this._updateRainIntensity();
+            console.log(`[Game] 存档加载成功：第${this.dayCount}天 ${this.getTimeStr()} 模式=${d.mode || 'unknown'}`);
             return true;
         } catch (e) {
             console.warn('存档加载失败:', e);
             return false;
+        }
+    }
+
+    /**
+     * 获取存档摘要信息（用于启动页面显示，不实际加载）
+     * @returns {Object|null} 存档摘要或null
+     */
+    static getSaveInfo() {
+        try {
+            const raw = localStorage.getItem('tihutown_save');
+            if (!raw) return null;
+            const d = JSON.parse(raw);
+            // ver=2才是完整存档，ver=1是旧版不完整存档（不支持断点续玩）
+            if (!d.ver || d.ver < 2) return null;
+            const aliveCount = d.npcs ? d.npcs.filter(n => !n.isDead).length : '?';
+            const totalCount = d.npcs ? d.npcs.length : 8;
+            const h = Math.floor((d.time / 3600) % 24);
+            const m = Math.floor((d.time / 60) % 60);
+            const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+            const savedDate = d.savedAt ? new Date(d.savedAt) : null;
+            const savedStr = savedDate ? `${savedDate.getMonth()+1}/${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2,'0')}` : '未知';
+            return {
+                mode: d.mode || 'unknown',
+                day: d.day || 1,
+                timeStr: timeStr,
+                aliveCount: aliveCount,
+                totalCount: totalCount,
+                savedAt: savedStr,
+                weather: d.weather || '晴天',
+            };
+        } catch (e) {
+            return null;
         }
     }
 

@@ -22,12 +22,14 @@
     { keywords: ['砍柴', '伐木', '搬运木柴'], requiredScene: 'village', effectType: 'produce_resource', resourceType: 'woodFuel', ratePerHour: 10, bubbleText: '🪓 砍柴中' },
     // 采集食物/捕鱼 → 产出食物
     { keywords: ['采集食物', '捕鱼', '搜索罐头'], requiredScene: 'village', effectType: 'produce_resource', resourceType: 'food', ratePerHour: 8, bubbleText: '🎣 采集食物中' },
-    // 采集建材/废墟 → 产出建材
-    { keywords: ['采集建材', '收集建材', '废墟'], requiredScene: 'village', effectType: 'produce_resource', resourceType: 'material', ratePerHour: 5, bubbleText: '🧱 采集建材中' },
-    // 维修发电机/技术工作 → 产出电力
+    // 户外采矿 → 产出电力（矿渣堆）
+    { keywords: ['采矿', '挖矿', '矿渣'], requiredScene: 'village', effectType: 'produce_resource', resourceType: 'power', ratePerHour: 12, bubbleText: '⛏️ 采矿中（⚡+12/h）' },
+    // 探索废墟 → 随机物资（每天限3次）
+    { keywords: ['探索废墟', '废墟探索', '废墟', '搜索废墟', '探索遗迹'], requiredScene: 'village', effectType: 'explore_ruins', ratePerHour: 1, bubbleText: '🔍 探索废墟中…' },
+    // 维修发电机/技术工作 → 产出电力（室内工坊）
     { keywords: ['维修发电机', '检查发电机', '技术工作', '制造工具'], requiredScene: 'workshop', effectType: 'produce_resource', resourceType: 'power', ratePerHour: 8, bubbleText: '🔧 维修发电机中（⚡+8/h）' },
-    // 设计暖炉扩建方案/协助建造 → 推进建造进度
-    { keywords: ['暖炉扩建', '设计暖炉', '协助建造', '扩建', '整理图纸', '规划'], requiredScene: 'workshop', effectType: 'build_progress', ratePerHour: 1, bubbleText: '🔨 暖炉扩建设计中' },
+    // 设计暖炉修复方案/协助修复 → 推进修复进度
+    { keywords: ['暖炉修复', '修复暖炉', '暖炉扩建', '设计暖炉', '协助建造', '扩建', '整理图纸', '规划'], requiredScene: 'workshop', effectType: 'build_progress', ratePerHour: 1, bubbleText: '🔨 暖炉修复中' },
     // 制作急救包/草药制剂 → 制作急救包
     { keywords: ['制作草药', '急救包', '草药制剂', '制药', '整理药品'], requiredScene: 'medical', effectType: 'craft_medkit', ratePerHour: 0.5, bubbleText: '💊 制作急救包中' },
     // 修理无线电 → 推进修理进度

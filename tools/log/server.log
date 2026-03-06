@@ -195,3 +195,494 @@ Node.js v24.13.0
 💡 切换端口: PORT=8081 node server.js
 按 Ctrl+C 停止服务器
 
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 AI模式 log 已保存: session_20260305_213659.log (177 字符)
+📝 AI模式 log 已保存: session_20260305_225753.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-05T15-23-51.log (2677 字符)
+📝 AI模式 log 已保存: session_20260305_232707.log (177 字符)
+📝 Debug log 已保存: debug_day1_2026-03-05T15-32-08.log (2737 字符)
+📝 Debug log 已保存: debug_day1_2026-03-05T15-37-07.log (2276 字符)
+📝 Debug log 已保存: debug_day3_2026-03-05T15-42-07.log (2528 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T15-47-07.log (2329 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T15-52-08.log (3524 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T15-57-36.log (3999 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-02-36.log (3938 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-07-36.log (3917 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-12-36.log (3917 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-17-36.log (3917 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-22-37.log (3892 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-27-37.log (3846 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-32-36.log (3846 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-37-36.log (3846 字符)
+📝 Debug log 已保存: debug_day4_2026-03-05T16-42-36.log (3846 字符)
+📝 AI模式 log 已保存: session_20260306_004256.log (177 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 AI模式 log 已保存: session_20260306_004329.log (177 字符)
+📝 Debug log 已保存: debug_day1_2026-03-05T16-48-29.log (2877 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 AI模式 log 已保存: session_20260306_004938.log (177 字符)
+📝 Debug log 已保存: debug_day1_2026-03-05T16-54-38.log (3217 字符)
+📝 Debug log 已保存: debug_day2_2026-03-05T16-59-38.log (3264 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 Debug log 已保存: debug_day2_2026-03-05T17-04-38.log (3283 字符)
+📝 AI模式 log 已保存: session_20260306_010519.log (177 字符)
+📝 Debug log 已保存: debug_day1_2026-03-05T17-10-19.log (8575 字符)
+📝 Debug log 已保存: debug_day2_2026-03-05T17-15-19.log (13347 字符)
+📝 AI模式 log 已保存: session_20260306_011529.log (177 字符)
+/data/project/project_revol/vibegame/20260305-gospel-snow-town/server.js:295
+    let filePath = path.join(ROOT_DIR, decodeURIComponent(req.url.split('?')[0]));
+                                       ^
+
+URIError: URI malformed
+    at decodeURIComponent (<anonymous>)
+    at Server.<anonymous> (/data/project/project_revol/vibegame/20260305-gospel-snow-town/server.js:295:40)
+    at Server.emit (node:events:508:28)
+    at parserOnIncoming (node:_http_server:1210:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:123:17)
+
+Node.js v24.13.0
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 AI模式 log 已保存: session_20260306_102441.log (177 字符)
+📝 Debug log 已保存: debug_day1_2026-03-06T02-29-41.log (7506 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T02-34-41.log (10708 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 Debug log 已保存: debug_day2_2026-03-06T02-39-41.log (13897 字符)
+📝 AI模式 log 已保存: session_20260306_104345.log (177 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 AI模式 log 已保存: session_20260306_104645.log (177 字符)
+📝 Debug log 已保存: debug_day1_2026-03-06T02-51-45.log (7757 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T02-56-45.log (11066 字符)
+📝 Debug log 已保存: debug_day3_2026-03-06T03-01-45.log (13631 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-06-46.log (14778 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-11-46.log (15106 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-17-11.log (15447 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-22-11.log (15276 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-27-11.log (15276 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-32-11.log (15275 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-37-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-42-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-47-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-52-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T03-57-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-02-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-07-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-12-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-17-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-22-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-27-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-32-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-37-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-42-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-47-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-52-11.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T04-56-45.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T05-01-45.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T05-06-45.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T05-11-45.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T05-16-45.log (15252 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T05-21-45.log (15252 字符)
+📝 Debug log 已保存: debug_day5_2026-03-06T05-26-45.log (14134 字符)
+📝 Debug log 已保存: debug_day6_2026-03-06T05-31-45.log (14372 字符)
+📝 Debug log 已保存: debug_day7_2026-03-06T05-36-45.log (14495 字符)
+📝 Debug log 已保存: debug_day9_2026-03-06T05-41-45.log (14652 字符)
+📝 Debug log 已保存: debug_day10_2026-03-06T05-46-45.log (14492 字符)
+📝 Debug log 已保存: debug_day11_2026-03-06T05-51-45.log (14471 字符)
+📝 Debug log 已保存: debug_day13_2026-03-06T05-56-45.log (14484 字符)
+📝 Debug log 已保存: debug_day14_2026-03-06T06-01-45.log (14456 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 AI模式 log 已保存: session_20260306_140627.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T06-11-27.log (6438 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T06-16-27.log (9680 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 Debug log 已保存: debug_day2_2026-03-06T06-21-27.log (11966 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T06-26-27.log (12755 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T06-31-27.log (12755 字符)
+📝 AI模式 log 已保存: session_20260306_143606.log (177 字符)
+📝 Debug log 已保存: debug_day1_2026-03-06T06-41-06.log (8226 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T06-46-06.log (10487 字符)
+📝 Debug log 已保存: debug_day3_2026-03-06T06-51-06.log (14256 字符)
+📝 Debug log 已保存: debug_day4_2026-03-06T06-56-06.log (15478 字符)
+📝 AI模式 log 已保存: session_20260306_150004.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T07-05-04.log (6596 字符)
+📝 Debug log 已保存: debug_day3_2026-03-06T07-10-04.log (9408 字符)
+📝 AI模式 log 已保存: session_20260306_151430.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T07-19-30.log (6031 字符)
+📝 AI模式 log 已保存: session_20260306_152051.log (177 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 AI模式 log 已保存: session_20260306_152542.log (177 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 Debug log 已保存: debug_day1_2026-03-06T07-30-42.log (5377 字符)
+📝 AI模式 log 已保存: session_20260306_153205.log (177 字符)
+📝 AI模式 log 已保存: session_20260306_153212.log (177 字符)
+📝 Debug log 已保存: debug_day1_2026-03-06T07-37-12.log (7632 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 Debug log 已保存: debug_day1_2026-03-06T07-42-12.log (11142 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 Debug log 已保存: debug_day2_2026-03-06T07-47-12.log (13322 字符)
+📝 Debug log 已保存: debug_day3_2026-03-06T07-52-12.log (14020 字符)
+📝 AI模式 log 已保存: session_20260306_155316.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T07-58-16.log (6863 字符)
+📝 Debug log 已保存: debug_day3_2026-03-06T08-03-16.log (8647 字符)
+📝 AI模式 log 已保存: session_20260306_160750.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T08-12-50.log (6326 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 AI模式 log 已保存: session_20260306_161428.log (177 字符)
+📝 AI模式 log 已保存: session_20260306_161510.log (177 字符)
+📝 AI模式 log 已保存: session_20260306_161543.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T08-20-43.log (7068 字符)
+📝 AI模式 log 已保存: session_20260306_162304.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T08-28-04.log (4544 字符)
+📝 Debug log 已保存: debug_day3_2026-03-06T08-33-04.log (7339 字符)
+📝 AI模式 log 已保存: session_20260306_163756.log (177 字符)
+📝 Debug log 已保存: debug_day2_2026-03-06T08-42-56.log (4905 字符)
+📝 Debug log 已保存: debug_day3_2026-03-06T08-47-56.log (6801 字符)
+📝 AI模式 log 已保存: session_20260306_165224.log (177 字符)
+📝 AI模式 log 已保存: session_20260306_165244.log (177 字符)
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+
+🎮 福音镇开发服务器已启动！
+📡 地址: http://localhost:8080
+📂 根目录: /data/project/project_revol/vibegame/20260305-gospel-snow-town
+📝 Debug Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/debug_log
+📝 AI模式 Log: /data/project/project_revol/vibegame/20260305-gospel-snow-town/log/aimode_log
+
+可用 API:
+  POST /api/save-debug-log    - 保存完整debug log
+  POST /api/append-debug-log  - 追加debug log
+  GET  /api/list-debug-logs   - 列出所有debug log文件
+  POST /api/save-aimode-log   - 保存AI模式log（覆盖）
+  POST /api/append-aimode-log - 追加AI模式log（增量）
+  POST /api/external-llm      - 外部LLM API代理转发
+
+💡 切换端口: PORT=8081 node server.js
+按 Ctrl+C 停止服务器
+
+📝 Debug log 已保存: debug_day2_2026-03-06T10-03-04.log (5121 字符)
+📝 Debug log 已保存: debug_day3_2026-03-06T10-08-04.log (7002 字符)

@@ -185,17 +185,19 @@ this.affinity = { qing_xuan: 72 };
         this._idleWatchdogCount = 0;      // 兜底触发次数
         this._idleWatchdogResetTime = 0;  // 兜底触发计数重置时间
 
-        // ============ 六大属性系统 ============
+        // ============ 核心属性系统（v2.2）============
         const a = config.attrs || {};
         this.stamina  = a.stamina  ?? 50;  // 💪 体力 (0~100) 每天工作消耗，休息恢复
-        this.savings  = a.savings  ?? 100; // 💰 存款 (0~∞) 通过工作赚取，消费花费
-        this.charisma = a.charisma ?? 50;  // ✨ 魅力 (0~100) 社交吸引力，影响好感度增长
-        this.wisdom   = a.wisdom   ?? 50;  // 🧠 智慧 (0~100) 认知能力，影响工作效率和决策
         this.health   = a.health   ?? 50;  // 🫀 健康 (0~100) 身体状况，低了会生病
-        this.empathy  = a.empathy  ?? 50;  // 💬 情商 (0~100) 处理人际关系能力
 
         // San值系统（精神值，类似《饥荒》的san值）
         this.sanity = a.sanity ?? 70; // 🧠 San值 (0~100) 精神状态，通宵/劳累降低，社交/娱乐/睡眠恢复
+
+        // 【v2.2】废弃属性保留但不再参与计算
+        this.savings  = 0;
+        this.charisma = 50;
+        this.wisdom   = 50;
+        this.empathy  = 50;
 
         // 属性变化计时器（缓慢变化，每游戏小时触发一次检查）
         this._attrUpdateTimer = 0;
@@ -294,7 +296,7 @@ this.affinity = { qing_xuan: 72 };
             // 【任务10】末日生存目标追踪
             mealsToday: 0,      // 今天吃了几顿
             woodChopped: 0,     // 今天砍了多少木柴
-            gatherCount: 0,     // 今天采集了多少次（食物/建材/电力）
+                gatherCount: 0,     // 今天采集了多少次（食物/电力/探索）
             frostbiteSaved: 0,  // 今天治疗了几人冻伤
             rareItemsFound: 0,  // 今天发现了几个稀有物品
             patrolCount: 0,     // 今天巡逻了几次
@@ -1645,13 +1647,9 @@ this.affinity = { qing_xuan: 72 };
             mood: this.mood,
             memories: this.memories.slice(-10),
             affinity: this.affinity,
-            // 六大属性 + San值
+            // 核心属性 + San值
             stamina: this.stamina,
-            savings: this.savings,
-            charisma: this.charisma,
-            wisdom: this.wisdom,
             health: this.health,
-            empathy: this.empathy,
             sanity: this.sanity,
             isSick: this.isSick,
             isCrazy: this.isCrazy,
@@ -1692,13 +1690,9 @@ this.affinity = { qing_xuan: 72 };
         this.mood = data.mood || this.mood;
         if (data.memories) this.memories = data.memories;
         if (data.affinity) this.affinity = data.affinity;
-        // 六大属性 + San值恢复
+        // 核心属性 + San值恢复
         if (data.stamina !== undefined) this.stamina = data.stamina;
-        if (data.savings !== undefined) this.savings = data.savings;
-        if (data.charisma !== undefined) this.charisma = data.charisma;
-        if (data.wisdom !== undefined) this.wisdom = data.wisdom;
         if (data.health !== undefined) this.health = data.health;
-        if (data.empathy !== undefined) this.empathy = data.empathy;
         if (data.sanity !== undefined) this.sanity = data.sanity;
         if (data.isSick !== undefined) this.isSick = data.isSick;
         if (data.isCrazy !== undefined) this.isCrazy = data.isCrazy;

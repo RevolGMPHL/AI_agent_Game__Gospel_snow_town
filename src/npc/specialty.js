@@ -15,7 +15,7 @@
         if (specialties.chopping) descParts.push(`砍柴效率×${specialties.chopping}`);
         if (specialties.hauling) descParts.push(`搬运效率×${specialties.hauling}`);
         if (specialties.food_processing) descParts.push(`食物加工效率×${specialties.food_processing}`);
-        if (specialties.gathering_material) descParts.push(`建材采集×${specialties.gathering_material}`);
+        if (specialties.gathering_explore) descParts.push(`废墟探索加成`);
         if (specialties.gathering_food) descParts.push(`食物采集×${specialties.gathering_food}`);
         if (specialties.generator_repair) descParts.push(`发电机维修×${specialties.generator_repair}`);
         if (specialties.furnace_build) descParts.push(`暖炉扩建×${specialties.furnace_build}`);
@@ -57,7 +57,7 @@
                 if (effect.resourceType === 'woodFuel' && specialties.chopping) return specialties.chopping;
                 if (effect.resourceType === 'food' && specialties.gathering_food) return specialties.gathering_food;
                 if (effect.resourceType === 'power' && specialties.generator_repair) return specialties.generator_repair;
-                if (effect.resourceType === 'material' && specialties.gathering_material) return specialties.gathering_material;
+        if (effect.resourceType === 'explore' && specialties.gathering_explore) return specialties.gathering_explore;
                 break;
             case 'build_progress':
                 if (specialties.furnace_build) return specialties.furnace_build;

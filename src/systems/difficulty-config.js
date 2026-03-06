@@ -25,10 +25,9 @@ const DIFFICULTY_LEVELS = {
 
         // 初始资源系数（乘以 RESOURCE_DEFAULTS）
         initialResources: {
-            woodFuel: 1.0,   // 20
+            woodFuel: 1.0,   // 30
             food: 1.0,       // 100
-            power: 1.0,      // 30
-            material: 1.0    // 10
+            power: 1.0,      // 40
         },
 
         // 资源消耗倍率
@@ -66,10 +65,9 @@ const DIFFICULTY_LEVELS = {
         expectedLives: '2~4世',
 
         initialResources: {
-            woodFuel: 0.9,   // 18
+            woodFuel: 0.9,   // 27
             food: 0.9,       // 90
-            power: 0.9,      // 27
-            material: 0.9    // 9
+            power: 0.9,      // 36
         },
 
         consumptionMult: {
@@ -101,10 +99,9 @@ const DIFFICULTY_LEVELS = {
         expectedLives: '4~6世',
 
         initialResources: {
-            woodFuel: 0.8,   // 16
+            woodFuel: 0.8,   // 24
             food: 0.8,       // 80
-            power: 0.8,      // 24
-            material: 0.8    // 8
+            power: 0.8,      // 32
         },
 
         consumptionMult: {
@@ -136,10 +133,9 @@ const DIFFICULTY_LEVELS = {
         expectedLives: '6~10世',
 
         initialResources: {
-            woodFuel: 0.7,   // 14
+            woodFuel: 0.7,   // 21
             food: 0.7,       // 70
-            power: 0.7,      // 21
-            material: 0.7    // 7
+            power: 0.7,      // 28
         },
 
         consumptionMult: {
@@ -171,10 +167,9 @@ const DIFFICULTY_LEVELS = {
         expectedLives: '10~15世',
 
         initialResources: {
-            woodFuel: 0.6,   // 12
+            woodFuel: 0.6,   // 18
             food: 0.6,       // 60
-            power: 0.6,      // 18
-            material: 0.6    // 6
+            power: 0.6,      // 24
         },
 
         consumptionMult: {
@@ -206,10 +201,9 @@ const DIFFICULTY_LEVELS = {
         expectedLives: '15~25世',
 
         initialResources: {
-            woodFuel: 0.5,   // 10
+            woodFuel: 0.5,   // 15
             food: 0.5,       // 50
-            power: 0.5,      // 15
-            material: 0.5    // 5
+            power: 0.5,      // 20
         },
 
         consumptionMult: {

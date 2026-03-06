@@ -96,14 +96,18 @@ def kill_processes():
         log("✅", "关闭了旧的 tmux session: gospel")
         killed = True
 
-    # 方法1: 通过PID文件精确关闭
+    # 方法1: 通过PID文件精确关闭（同时杀父进程组，确保 bash 壳和 node 子进程都被杀掉）
     if os.path.exists(PID_FILE):
         with open(PID_FILE) as f:
             old_pid = f.read().strip()
         if old_pid:
             try:
                 pid = int(old_pid)
-                os.kill(pid, signal.SIGTERM)
+                # 先尝试杀进程组（如果是 bash 壳进程，会级联杀子进程）
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    os.kill(pid, signal.SIGTERM)
                 log("✅", f"通过PID文件关闭进程: {pid}")
                 killed = True
             except (ProcessLookupError, ValueError):
@@ -170,10 +174,9 @@ def start_server(port):
         log("❌", "tmux 启动失败，请确认已安装 tmux")
         return None, port
 
-    # 等待进程出现并获取 PID
-    time.sleep(1)
-    _, pid_out = run_cmd("pgrep -f 'node server.js' | head -1")
-    pid = pid_out.strip() if pid_out.strip() else "未知"
+    # 等待进程出现并获取 **真正的 node 进程** PID（排除 bash 壳进程）
+    time.sleep(1.5)
+    pid = _get_real_node_pid(port)
 
     # 写入PID文件
     with open(PID_FILE, "w") as f:
@@ -182,6 +185,37 @@ def start_server(port):
     log("✅", f"服务已在 tmux 中启动 | PID: {pid} | 端口: {port}")
     log("📺", f"查看: tmux attach -t {TMUX_SESSION}")
     return pid, port
+
+
+def _get_real_node_pid(port):
+    """获取真正监听端口的 node 进程 PID，而非 bash 壳进程"""
+    # 方法1: 通过 lsof 精确获取端口监听进程 PID
+    _, lsof_out = run_cmd(f"lsof -i:{port} -sTCP:LISTEN -t 2>/dev/null")
+    if lsof_out.strip():
+        # 可能有多行，取第一个
+        pid = lsof_out.strip().split('\n')[0].strip()
+        if pid.isdigit():
+            return pid
+
+    # 方法2: 通过 ss 获取
+    _, ss_out = run_cmd(f"ss -tlnp 'sport = :{port}' 2>/dev/null")
+    if ss_out:
+        import re
+        m = re.search(r'pid=(\d+)', ss_out)
+        if m:
+            return m.group(1)
+
+    # 方法3: 兜底 pgrep，但排除 bash 壳进程
+    _, pgrep_out = run_cmd("pgrep -a 'node' 2>/dev/null")
+    if pgrep_out:
+        for line in pgrep_out.split('\n'):
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and 'server.js' in parts[1] and 'bash' not in parts[1]:
+                return parts[0]
+
+    # 最终兜底
+    _, pid_out = run_cmd("pgrep -f 'node server.js' | tail -1")
+    return pid_out.strip() if pid_out.strip() else "未知"
 
 
 # ==================== Step 6: 健康检查 ====================
@@ -194,8 +228,21 @@ def health_check(port):
             req = urllib.request.urlopen(url, timeout=3)
             code = req.getcode()
             if code == 200:
+                # 验证 PID 文件中的进程确实在运行
+                pid_ok = False
+                if os.path.exists(PID_FILE):
+                    with open(PID_FILE) as f:
+                        recorded_pid = f.read().strip()
+                    if recorded_pid.isdigit():
+                        try:
+                            os.kill(int(recorded_pid), 0)  # 检查进程是否存在
+                            pid_ok = True
+                        except (ProcessLookupError, PermissionError):
+                            pass
                 log("✅", f"服务正常运行！")
                 log("🌐", f"访问地址: http://localhost:{port}/")
+                if not pid_ok:
+                    log("⚠️", f"PID文件记录可能不准确，但服务确实在运行")
                 return True
         except Exception:
             pass

@@ -85,6 +85,14 @@
                 <div class="model-status" id="model-status"></div>
             </div>
 
+            <!-- 继续游戏按钮（检测到存档时显示） -->
+            <div id="continue-game-section" style="text-align:center; margin-top:20px;">
+                <button class="mode-btn continue" id="btn-mode-continue" style="display:none; width:100%; max-width:480px;">
+                    ▶️ 继续游戏
+                    <div class="btn-sub" id="continue-save-hint">加载上次的进度</div>
+                </button>
+            </div>
+
             <div style="display:flex; gap:16px; justify-content:center; margin-top:24px; flex-wrap:wrap;">
                 <button class="mode-btn agent" id="btn-mode-agent">
                     🤖 AI 观察模式
@@ -120,6 +128,18 @@
                     🔒 轮回中难度已锁定，勾选「从第1世重新开始」可重新选择
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ====== 素材加载遮罩 ====== -->
+    <div id="asset-loading-overlay" style="display:none;">
+        <div class="loading-panel">
+            <div class="loading-snowflake">❄️</div>
+            <h2 class="loading-title">正在准备福音雪镇…</h2>
+            <div class="loading-bar-container">
+                <div class="loading-bar-fill" id="loading-bar-fill"></div>
+            </div>
+            <div class="loading-status" id="loading-status-text">加载素材中...</div>
         </div>
     </div>
 
@@ -205,10 +225,10 @@
                 <span class="res-bar-val" id="res-power-val">30</span>
             </div>
             <div class="res-bar-item">
-                <span class="res-bar-icon">🧱</span>
-                <span class="res-bar-label">建材</span>
-                <span class="res-bar-gauge"><div class="res-bar-fill" id="res-material-fill" style="width:20%"></div></span>
-                <span class="res-bar-val" id="res-material-val">10</span>
+                <span class="res-bar-icon">🔍</span>
+                <span class="res-bar-label">探索</span>
+                <span class="res-bar-gauge"><div class="res-bar-fill" id="res-explore-fill" style="width:100%"></div></span>
+                <span class="res-bar-val" id="res-explore-val">3/3</span>
             </div>
             <div class="res-bar-item res-bar-item-medkit">
                 <span class="res-bar-icon">💊</span>
@@ -242,10 +262,10 @@
             <div id="event-log"></div>
         </div>
 
-        <!-- 聊天记录面板 -->
+        <!-- 决策动态面板（原聊天记录面板，现包含决策+对话） -->
         <div id="chat-log-sidebar">
             <div class="sidebar-header">
-                <span class="sidebar-title">💬 聊天记录</span>
+                <span class="sidebar-title">🧠 决策动态</span>
                 <button id="btn-save-debug-log" class="chat-log-clear-btn" title="保存Debug日志到服务器">💾</button>
                 <button id="btn-clear-chat-log" class="chat-log-clear-btn" title="清空记录">🗑️</button>
             </div>
@@ -332,66 +352,66 @@
     <script>window.GST = {};</script>
 
     <!-- ====== Layer 0: 常量 + 工具 ====== -->
-    <script src="src/core/constants.js?v=40"></script>
-    <script src="src/utils/helpers.js?v=40"></script>
-    <script src="src/utils/sprite-loader.js?v=40"></script>
-    <script src="src/utils/pathfinding.js?v=40"></script>
+    <script src="src/core/constants.js?v=41"></script>
+    <script src="src/utils/helpers.js?v=41"></script>
+    <script src="src/utils/sprite-loader.js?v=41"></script>
+    <script src="src/utils/pathfinding.js?v=41"></script>
 
     <!-- ====== Layer 1: 数据层 ====== -->
-    <script src="data/npc-configs.js?v=40"></script>
-    <script src="data/npc-schedules.js?v=40"></script>
-    <script src="data/npc-prompts.js?v=40"></script>
-    <script src="data/action-effects.js?v=40"></script>
-    <script src="data/map-data.js?v=40"></script>
-    <script src="data/task-definitions.js?v=40"></script>
-    <script src="data/event-definitions.js?v=40"></script>
+    <script src="data/npc-configs.js?v=41"></script>
+    <script src="data/npc-schedules.js?v=41"></script>
+    <script src="data/npc-prompts.js?v=41"></script>
+    <script src="data/action-effects.js?v=41"></script>
+    <script src="data/map-data.js?v=41"></script>
+    <script src="data/task-definitions.js?v=41"></script>
+    <script src="data/event-definitions.js?v=41"></script>
 
     <!-- ====== Layer 2: 地图系统 ====== -->
-    <script src="src/map/base-map.js?v=40"></script>
-    <script src="src/map/village-map.js?v=40"></script>
-    <script src="src/map/indoor/indoor-map.js?v=40"></script>
-    <script src="src/map/indoor/dorm-a.js?v=40"></script>
-    <script src="src/map/indoor/dorm-b.js?v=40"></script>
-    <script src="src/map/indoor/warehouse.js?v=40"></script>
-    <script src="src/map/indoor/medical.js?v=40"></script>
-    <script src="src/map/indoor/kitchen.js?v=40"></script>
-    <script src="src/map/indoor/workshop.js?v=40"></script>
-    <script src="src/map/indoor/command.js?v=40"></script>
-    <script src="src/map/map-registry.js?v=40"></script>
+    <script src="src/map/base-map.js?v=41"></script>
+    <script src="src/map/village-map.js?v=41"></script>
+    <script src="src/map/indoor/indoor-map.js?v=41"></script>
+    <script src="src/map/indoor/dorm-a.js?v=41"></script>
+    <script src="src/map/indoor/dorm-b.js?v=41"></script>
+    <script src="src/map/indoor/warehouse.js?v=41"></script>
+    <script src="src/map/indoor/medical.js?v=41"></script>
+    <script src="src/map/indoor/kitchen.js?v=41"></script>
+    <script src="src/map/indoor/workshop.js?v=41"></script>
+    <script src="src/map/indoor/command.js?v=41"></script>
+    <script src="src/map/map-registry.js?v=41"></script>
 
     <!-- ====== Layer 3: NPC 核心 + mixin ====== -->
-    <script src="src/npc/npc.js?v=40"></script>
-    <script src="src/npc/npc-ai.js?v=40"></script>
-    <script src="src/npc/npc-attributes.js?v=40"></script>
-    <script src="src/npc/npc-renderer.js?v=40"></script>
-    <script src="src/npc/npc-schedule.js?v=40"></script>
-    <script src="src/npc/action-effects.js?v=40"></script>
-    <script src="src/npc/specialty.js?v=40"></script>
+    <script src="src/npc/npc.js?v=41"></script>
+    <script src="src/npc/npc-ai.js?v=41"></script>
+    <script src="src/npc/npc-attributes.js?v=41"></script>
+    <script src="src/npc/npc-renderer.js?v=41"></script>
+    <script src="src/npc/npc-schedule.js?v=41"></script>
+    <script src="src/npc/action-effects.js?v=41"></script>
+    <script src="src/npc/specialty.js?v=41"></script>
 
     <!-- ====== Layer 4: 游戏子系统 ====== -->
-    <script src="src/systems/difficulty-config.js?v=40"></script>
-    <script src="src/systems/weather-system.js?v=40"></script>
-    <script src="src/systems/resource-system.js?v=40"></script>
-    <script src="src/systems/furnace-system.js?v=40"></script>
-    <script src="src/systems/death-system.js?v=40"></script>
-    <script src="src/systems/reincarnation-system.js?v=40"></script>
-    <script src="src/systems/task-system.js?v=40"></script>
-    <script src="src/systems/event-system.js?v=40"></script>
+    <script src="src/systems/difficulty-config.js?v=41"></script>
+    <script src="src/systems/weather-system.js?v=41"></script>
+    <script src="src/systems/resource-system.js?v=41"></script>
+    <script src="src/systems/furnace-system.js?v=41"></script>
+    <script src="src/systems/death-system.js?v=41"></script>
+    <script src="src/systems/reincarnation-system.js?v=41"></script>
+    <script src="src/systems/task-system.js?v=41"></script>
+    <script src="src/systems/event-system.js?v=41"></script>
 
     <!-- ====== Layer 5: 对话 + AI ====== -->
-    <script src="src/dialogue/dialogue-manager.js?v=40"></script>
-    <script src="src/dialogue/dialogue-ui.js?v=40"></script>
-    <script src="src/ai/llm-client.js?v=40"></script>
-    <script src="src/ai/llm-status.js?v=40"></script>
-    <script src="src/ai/aimode-logger.js?v=40"></script>
+    <script src="src/dialogue/dialogue-manager.js?v=41"></script>
+    <script src="src/dialogue/dialogue-ui.js?v=41"></script>
+    <script src="src/ai/llm-client.js?v=41"></script>
+    <script src="src/ai/llm-status.js?v=41"></script>
+    <script src="src/ai/aimode-logger.js?v=41"></script>
 
     <!-- ====== Layer 6: 核心引擎 + UI + 启动 ====== -->
-    <script src="src/core/camera.js?v=40"></script>
-    <script src="src/core/game.js?v=40"></script>
-    <script src="src/core/renderer.js?v=40"></script>
-    <script src="src/core/input.js?v=40"></script>
-    <script src="src/ui/hud.js?v=40"></script>
-    <script src="src/core/startup.js?v=40"></script>
+    <script src="src/core/camera.js?v=41"></script>
+    <script src="src/core/game.js?v=42"></script>
+    <script src="src/core/renderer.js?v=41"></script>
+    <script src="src/core/input.js?v=41"></script>
+    <script src="src/ui/hud.js?v=41"></script>
+    <script src="src/core/startup.js?v=42"></script>
 
     <!-- ====== 向后兼容别名（渐进迁移用，后续可移除） ====== -->
     <script>

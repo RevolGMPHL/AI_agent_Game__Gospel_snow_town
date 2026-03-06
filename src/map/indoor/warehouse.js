@@ -14,7 +14,7 @@
             this.furniture = [
                 { x: 1, y: 1, w: 3, h: 2, color: '#8B5520', name: '🪵木柴区', zone: 'wood' },
                 { x: 6, y: 1, w: 3, h: 2, color: '#A09050', name: '🍖食物区', zone: 'food' },
-                { x: 1, y: 4, w: 3, h: 2, color: '#7A7A7A', name: '🧱建材区', zone: 'material' },
+                { x: 1, y: 4, w: 3, h: 2, color: '#7A7A7A', name: '⚡电力区', zone: 'power' },
                 { x: 6, y: 4, w: 3, h: 2, color: '#6A5A4A', name: '📦杂物区', zone: 'misc' },
             ];
         }
@@ -32,7 +32,7 @@
                         const rs = window.game.resourceSystem;
                         if (f.zone === 'wood') fillPct = Math.min(1, rs.woodFuel / 80);
                         else if (f.zone === 'food') fillPct = Math.min(1, rs.food / 60);
-                        else if (f.zone === 'material') fillPct = Math.min(1, rs.material / 60);
+                        else if (f.zone === 'power') fillPct = Math.min(1, rs.power / 60);
                         else fillPct = 0.3;
                     }
                     // 堆叠高度
@@ -67,10 +67,10 @@
     
         describe(gx, gy) {
             const others = this._getOtherPeopleHere();
-            let desc = '你在仓库里。四个储物区分别存放着木柴、食物、建材和杂物。';
+            let desc = '你在仓库里。四个储物区分别存放着木柴、食物、电力储备和杂物。';
             if (typeof window !== 'undefined' && window.game && window.game.resourceSystem) {
                 const rs = window.game.resourceSystem;
-                desc += `木柴:${Math.round(rs.woodFuel)} 食物:${Math.round(rs.food)} 建材:${Math.round(rs.material)}。`;
+                desc += `木柴:${Math.round(rs.woodFuel)} 食物:${Math.round(rs.food)} 电力:${Math.round(rs.power)}。`;
             }
             if (others.length > 0) desc += `仓库里有${others.join('、')}。`;
             desc += '出口在南边。';

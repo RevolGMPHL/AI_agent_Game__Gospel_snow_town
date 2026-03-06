@@ -174,7 +174,6 @@ class ReincarnationSystem {
             woodFuel: Math.round(rs.woodFuel),
             food: Math.round(rs.food),
             power: Math.round(rs.power),
-            material: Math.round(rs.material),
             totalConsumed: { ...rs.totalConsumed },
             totalCollected: { ...rs.totalCollected },
         } : null;
@@ -284,7 +283,7 @@ class ReincarnationSystem {
 
         // 6. 第二暖炉未建好
         if (!secondFurnaceBuilt) {
-            lessons.push('第二暖炉未能建好，应在第1天就开始收集建材，第3天优先建造');
+            lessons.push('第二暖炉未能建好，Day3解锁后应立即派2人去工坊修复');
         }
 
         // 7. 全员存活
@@ -416,7 +415,7 @@ class ReincarnationSystem {
             // 资源状况
             if (lastLife.resourceSnapshot) {
                 const rs = lastLife.resourceSnapshot;
-                hint += `上世最终资源:木柴${rs.woodFuel}食物${rs.food}电力${rs.power}建材${rs.material}。`;
+                hint += `上世最终资源:木柴${rs.woodFuel}食物${rs.food}电力${rs.power}。`;
             }
 
             // 暖炉状态
@@ -456,7 +455,7 @@ class ReincarnationSystem {
 
             if (lastLife.resourceSnapshot) {
                 const rs = lastLife.resourceSnapshot;
-                hint += `最终资源:木柴${rs.woodFuel}食物${rs.food}电力${rs.power}建材${rs.material}。`;
+                hint += `最终资源:木柴${rs.woodFuel}食物${rs.food}电力${rs.power}。`;
             }
 
             if (!lastLife.secondFurnaceBuilt) {
@@ -499,7 +498,7 @@ class ReincarnationSystem {
 
         // 暖炉建议
         if (!lastLife.secondFurnaceBuilt) {
-            advice += '第1天就开始收集建材50+，第3天全力建第二暖炉;';
+            advice += 'Day3解锁第二暖炉后立即派2人去工坊修复;';
         }
 
         // 户外安全
@@ -669,13 +668,13 @@ class ReincarnationSystem {
             dayPlans: {
                 1: [
                     { npcId: 'zhao_chef', task: 'COLLECT_WOOD', targetLocation: 'lumber_camp', reason: '默认：砍柴' },
-                    { npcId: 'lu_chen', task: 'COLLECT_MATERIAL', targetLocation: 'ruins_site', reason: '默认：采建材' },
+                    { npcId: 'lu_chen', task: 'COLLECT_WOOD', targetLocation: 'lumber_camp', reason: '默认：砍柴' },
                     { npcId: 'li_shen', task: 'COLLECT_FOOD', targetLocation: 'frozen_lake', reason: '默认：采食物' },
                     { npcId: 'wang_teacher', task: 'MAINTAIN_POWER', targetLocation: 'workshop_door', reason: '默认：维护电力' },
                     { npcId: 'old_qian', task: 'COORDINATE', targetLocation: 'furnace_plaza', reason: '默认：统筹协调' },
                     { npcId: 'su_doctor', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '默认：医疗准备' },
                     { npcId: 'ling_yue', task: 'SCOUT_RUINS', targetLocation: 'ruins_site', reason: '默认：废墟侦察' },
-                    { npcId: 'qing_xuan', task: 'CRAFT_MEDICINE', targetLocation: 'medical_door', reason: '默认：制药' },
+{ npcId: 'qing_xuan', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '默认：医疗救治' },
                 ],
                 2: [
                     { npcId: 'zhao_chef', task: 'COLLECT_WOOD', targetLocation: 'lumber_camp', reason: '冒险砍柴(限2h)' },
@@ -685,7 +684,7 @@ class ReincarnationSystem {
                     { npcId: 'old_qian', task: 'MAINTAIN_ORDER', targetLocation: 'furnace_plaza', reason: '安抚情绪' },
                     { npcId: 'su_doctor', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗待命' },
                     { npcId: 'ling_yue', task: 'BOOST_MORALE', targetLocation: 'furnace_plaza', reason: '鼓舞士气' },
-                    { npcId: 'qing_xuan', task: 'CRAFT_MEDICINE', targetLocation: 'medical_door', reason: '制药' },
+{ npcId: 'qing_xuan', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗救治' },
                 ],
                 3: [
                     { npcId: 'zhao_chef', task: 'COLLECT_WOOD', targetLocation: 'lumber_camp', reason: '补充木柴为第4天' },
@@ -705,12 +704,12 @@ class ReincarnationSystem {
                     { npcId: 'old_qian', task: 'MAINTAIN_ORDER', targetLocation: 'furnace_plaza', reason: '维持秩序(室内)' },
                     { npcId: 'su_doctor', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗待命(室内)' },
                     { npcId: 'ling_yue', task: 'BOOST_MORALE', targetLocation: 'furnace_plaza', reason: '鼓舞士气(室内)' },
-                    { npcId: 'qing_xuan', task: 'CRAFT_MEDICINE', targetLocation: 'medical_door', reason: '制药(室内)' },
+{ npcId: 'qing_xuan', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗救治(室内)' },
                 ],
             },
             strategy: 'default',
             summary: '第1世：默认分工方案',
-            workPlanSummary: '第1世默认:赵砍柴,陆建材,李食物,王电力,钱统筹,苏医疗,玥侦察,璇制药',
+            workPlanSummary: '第1世默认:赵砍柴,陆砍柴,李食物,王电力,钱统筹,苏医疗,玥侦察,璇制药',
         };
         return plan;
     }
@@ -743,10 +742,10 @@ class ReincarnationSystem {
                 return a;
             });
         }
-        if (bottlenecks.material === 'critical' && !lastLife.secondFurnaceBuilt) {
-            // 建材不足且暖炉未建：第1天就让陆辰采建材
+        if (bottlenecks.power === 'critical') {
+            // 电力不足：第1天就让歆玥去矿渣堆采矿
             plan.dayPlans[1] = plan.dayPlans[1].map(a => {
-                if (a.npcId === 'lu_chen') return { ...a, task: 'COLLECT_MATERIAL', targetLocation: 'ruins_site', reason: '前世暖炉未建，优先建材' };
+                if (a.npcId === 'ling_yue') return { ...a, task: 'COLLECT_POWER', targetLocation: 'ore_pile', reason: `前世电力仅剩${rs.power}，增派采矿` };
                 return a;
             });
         }
@@ -849,17 +848,13 @@ class ReincarnationSystem {
         if (rs.power < 10) result.power = 'critical';
         else if (rs.power < 25) result.power = 'warning';
         else result.power = 'ok';
-        // 建材
-        if (rs.material < 10) result.material = 'critical';
-        else if (rs.material < 30) result.material = 'warning';
-        else result.material = 'ok';
         return result;
     }
 
     /** 生成工作安排摘要（≤200字符） */
     _generateWorkPlanSummary(plan) {
         const nameMap = { zhao_chef: '赵', lu_chen: '陆', li_shen: '李', wang_teacher: '王', old_qian: '钱', su_doctor: '苏', ling_yue: '玥', qing_xuan: '璇' };
-        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食', COLLECT_MATERIAL: '建材', MAINTAIN_POWER: '电力', COORDINATE: '统筹', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', CRAFT_MEDICINE: '制药', BOOST_MORALE: '鼓舞', BUILD_FURNACE: '建炉', MAINTAIN_FURNACE: '维炉', MAINTAIN_ORDER: '秩序', DISTRIBUTE_FOOD: '分食', REPAIR_RADIO: '电台', REST_RECOVER: '休息' };
+        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食', COLLECT_MATERIAL: '探索', MAINTAIN_POWER: '电力', COORDINATE: '统筹', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞', BUILD_FURNACE: '建炉', MAINTAIN_FURNACE: '维炉', MAINTAIN_ORDER: '秩序', DISTRIBUTE_FOOD: '分食', REPAIR_RADIO: '电台', REST_RECOVER: '休息' };
         // 只输出Day1的安排
         const day1 = (plan.dayPlans[1] || []).map(a => `${nameMap[a.npcId] || '?'}${taskShort[a.task] || a.task}`).join(',');
         let summary = `D1:${day1}`;
@@ -883,7 +878,7 @@ class ReincarnationSystem {
         // ===== 资源比例分析 =====
         if (rs && rs.totalCollected) {
             const tc = rs.totalCollected;
-            const total = (tc.woodFuel || 0) + (tc.food || 0) + (tc.power || 0) + (tc.material || 0);
+        const total = (tc.woodFuel || 0) + (tc.food || 0) + (tc.power || 0);
             if (total > 0) {
                 const woodRatio = (tc.woodFuel || 0) / total;
                 const foodRatio = (tc.food || 0) / total;
@@ -1015,9 +1010,9 @@ class ReincarnationSystem {
             }
 
             if (consecutiveFurnaceFail >= 3) {
-                strategic.unshift(`🔴🔴 连续${consecutiveFurnaceFail}世暖炉未建成！历史共${furnaceFailCount}/${this.pastLives.length}世失败，第1天就必须开始采建材！`);
+                strategic.unshift(`🔴🔴 连续${consecutiveFurnaceFail}世暖炉未建成！历史共${furnaceFailCount}/${this.pastLives.length}世失败，Day3必须立即派2人去工坊修复！`);
             } else if (consecutiveFurnaceFail >= 2) {
-                strategic.unshift(`🔴 连续${consecutiveFurnaceFail}世暖炉未建！第1天就必须开始采建材`);
+                strategic.unshift(`🔴 连续${consecutiveFurnaceFail}世暖炉未建！Day3必须立即修复`);
             }
 
             for (let day = 1; day <= 4; day++) {
@@ -1138,7 +1133,7 @@ class ReincarnationSystem {
         if (!dayPlan) return '';
 
         const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
-        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '采建材', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', CRAFT_MEDICINE: '制药', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', MAINTAIN_FURNACE: '维护暖炉', MAINTAIN_ORDER: '维持秩序', DISTRIBUTE_FOOD: '分配食物', REPAIR_RADIO: '修无线电', REST_RECOVER: '休息' };
+        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', MAINTAIN_FURNACE: '维护暖炉', MAINTAIN_ORDER: '维持秩序', DISTRIBUTE_FOOD: '分配食物', REPAIR_RADIO: '修无线电', REST_RECOVER: '休息' };
 
         let summary = `【${nameMap[holder.id] || holder.name}的工作安排·第${day}天】\n`;
         for (const assignment of dayPlan) {
@@ -1213,7 +1208,7 @@ class ReincarnationSystem {
             if (plan.dayPlans && plan.dayPlans[1]) {
                 for (let i = 0; i < plan.dayPlans[1].length; i++) {
                     const a = plan.dayPlans[1][i];
-                    if (a.task === 'SCOUT_RUINS' || a.task === 'CRAFT_MEDICINE') {
+                    if (a.task === 'SCOUT_RUINS' || a.task === 'PREPARE_MEDICAL') {
                         plan.dayPlans[1][i] = { ...a, task: 'COLLECT_WOOD', targetLocation: 'lumber_camp', reason: `基于最好方案微调:上世木柴仅剩${rs.woodFuel}导致冻死` };
                         break;
                     }
@@ -1227,7 +1222,7 @@ class ReincarnationSystem {
             if (plan.dayPlans && plan.dayPlans[1]) {
                 for (let i = 0; i < plan.dayPlans[1].length; i++) {
                     const a = plan.dayPlans[1][i];
-                    if (a.task === 'SCOUT_RUINS' || a.task === 'CRAFT_MEDICINE') {
+                    if (a.task === 'SCOUT_RUINS' || a.task === 'PREPARE_MEDICAL') {
                         plan.dayPlans[1][i] = { ...a, task: 'COLLECT_FOOD', targetLocation: 'frozen_lake', reason: `基于最好方案微调:上世食物仅剩${rs.food}导致饿死` };
                         break;
                     }

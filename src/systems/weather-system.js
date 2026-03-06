@@ -497,7 +497,7 @@ class WeatherSystem {
         const fs = this.game.furnaceSystem;
         return `【生存状态】第${this.currentDay}天 | 温度${temp}°C | ${this.currentWeather} | ` +
             `存活${alive}/8人 | ` +
-            (rs ? `木柴${Math.round(rs.woodFuel)} 食物${Math.round(rs.food)} 电力${Math.round(rs.power)} 建材${Math.round(rs.material)} | ` : '') +
+            (rs ? `木柴${Math.round(rs.woodFuel)} 食物${Math.round(rs.food)} 电力${Math.round(rs.power)} | ` : '') +
             (fs ? `暖炉${fs.furnaces.length}座(${fs.getActiveFurnaceCount()}运转中)` : '');
     }
 
@@ -514,7 +514,7 @@ class WeatherSystem {
         if (day === 1) {
             // 第1天：准备日，距暴风雪还有约2天
             const hoursUntilStorm = Math.max(0, (4 - 1) * 24 - hour);
-            urgency = `🚨 【暴风雪预警】今天是准备日（第1天），大极寒暴风雪将在第4天降临（-60°C！），距离暴风雪大约还有${Math.round(hoursUntilStorm)}小时。今天必须疯狂收集木柴、食物、建材！明天（第2天）就会降温到-30°C大雪，户外活动将严格限制在2小时内。每一分钟都不能浪费！`;
+            urgency = `🚨 【暴风雪预警】今天是准备日（第1天），大极寒暴风雪将在第4天降临（-60°C！），距离暴风雪大约还有${Math.round(hoursUntilStorm)}小时。今天必须疯狂收集木柴、食物！明天（第2天）就会降温到-30°C大雪，户外活动将严格限制在2小时内。每一分钟都不能浪费！`;
             survivalChecklist = this._buildSurvivalChecklist(rs, fs);
         } else if (day === 2) {
             // 第2天：寒冷天，-30°C
@@ -551,9 +551,7 @@ class WeatherSystem {
         checklist += `  🪵 木柴: ${Math.round(rs.woodFuel)}单位（第4天至少需要${woodNeededDay4}单位）${rs.woodFuel >= woodNeededDay4 ? '✅够了' : `❌还差${Math.round(woodNeededDay4 - rs.woodFuel)}单位！`}\n`;
         checklist += `  🍞 食物: ${Math.round(rs.food)}单位（第4天至少需要${foodNeededDay4}单位）${rs.food >= foodNeededDay4 ? '✅够了' : `❌还差${Math.round(foodNeededDay4 - rs.food)}单位！`}\n`;
         checklist += `  ⚡ 电力: ${Math.round(rs.power)}单位（第4天至少需要${powerNeededDay4}单位）${rs.power >= powerNeededDay4 ? '✅够了' : `❌还差${Math.round(powerNeededDay4 - rs.power)}单位！`}\n`;
-        checklist += `  🔥 暖炉: ${furnaceCount}座（${activeFurnaces}运转中）${secondFurnaceBuilt ? '✅第二暖炉已建好' : '❌第二暖炉未建！8人挤1座暖炉很危险！'}\n`;
-        checklist += `  🧱 建材: ${Math.round(rs.material)}单位${!secondFurnaceBuilt ? `（修建第二暖炉需要50单位，${rs.material >= 50 ? '✅够了' : `❌还差${Math.round(50 - rs.material)}！`}）` : ''}`;
-
+        checklist += `  🔥 暖炉: ${furnaceCount}座（${activeFurnaces}运转中）${secondFurnaceBuilt ? '✅第二暖炉已修复' : '❌第二暖炉未修复！8人挤1座暖炉很危险！'}`;
         return checklist;
     }
 }
