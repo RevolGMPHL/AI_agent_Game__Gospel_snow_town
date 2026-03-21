@@ -320,7 +320,9 @@ class FurnaceSystem {
             ? 1 + (workerCount - 3) * 0.15
             : workerCount * 0.5; // 1人=0.5x, 2人=1.0x, 3人+=加速
 
-        const progressIncrement = (dt / FURNACE_CONFIG.buildTimeSeconds) * efficiencyMultiplier;
+        // 【修复】dt是speed-adjusted真实秒，buildTimeSeconds是游戏秒，需乘timeSpeed转换
+        const gameSeconds = dt * (this.game.timeSpeed || 60);
+        const progressIncrement = (gameSeconds / FURNACE_CONFIG.buildTimeSeconds) * efficiencyMultiplier;
         this.buildProgress = Math.min(1, this.buildProgress + progressIncrement);
 
         // 每10%进度报告一次

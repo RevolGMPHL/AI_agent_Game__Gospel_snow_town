@@ -1165,3 +1165,246 @@ v4.0 重构后，各模块使用 IIFE 隔离。IIFE 内部的 `let/const` 变量
 ### 44. P0 子优先级死循环 — 体温避险与医疗需求互相打架，NPC 永远到不了医疗站 🆕🔴
 
 NPC 健康危急(HP<30)触发 P0-5 `medical_urgent`，出门瞬间体温降到 <35°C 被 P0-2 `hypothermia` 覆盖送回宿舍，回宿舍后体温恢复又触发 P0-5 出门，形成**无限死循环**。根因是 **P0 层内的多个子优先级之间没有互斥/优先级仲裁**，按代码顺序执行时高编号的 P0-5 总是被低编号的 P0-2 覆盖。**修复方案**：P0-2 增加"赶往室内目标免疫"（医疗站/宿舍也是室内，进去就能恢复体温），仅当体温 <33°C 严重失温时才强制覆盖。⚠️ **开发注意**：同层 P0 子优先级之间不能无条件互相覆盖，必须考虑 NPC 的目标是否也能满足覆盖者的需求（如"去医疗站"也能解决体温问题因为医疗站是室内）。**通用原则：多个 P0 子优先级之间需要仲裁机制，不能简单地按代码顺序覆盖。**
+
+---
+
+## 🔥 坑45：ACTION_EFFECT_MAP 关键词不匹配 — NPC"做事"但无效果
+
+### 问题现象
+多个NPC在工坊显示"🔧 正在维护电力"，但电力一点没增加。NPC确实到达了正确场景，状态描述也显示在维护，但资源产出为0。
+
+### 问题根因
+任务系统给NPC设置的 `stateDesc` 是 `"🔧 正在维护电力"`，但行动效果系统（`ACTION_EFFECT_MAP`）中产出电力的关键词是 `['维修发电机', '检查发电机', '技术工作', '制造工具']`。**`"维护电力"` 与所有关键词都不匹配**，每帧的关键词匹配逻辑全部空转，零产出。
+
+这是一个**系统间接口不一致**问题：任务系统设置的 `stateDesc` 和行动效果系统期望的关键词来自两套独立的配置，新增任务时只在一处添加了描述，忘了同步更新另一处的关键词列表。
+
+### 解决方案
+在 `ACTION_EFFECT_MAP` 电力产出条目的 `keywords` 数组中补充 `'维护电力'` 和 `'正在维护电力'`。
+
+### ⚠️ 开发注意
+- **任务系统的 `stateDesc` 和 `ACTION_EFFECT_MAP` 的 `keywords` 必须双向同步**。新增/修改任务的描述文案时，必须检查行动效果系统的关键词列表是否能匹配上
+- **NPC"做事但无效果"时，优先排查关键词匹配链路**：`stateDesc` → `ACTION_EFFECT_MAP.keywords` → `effectType` 三者必须完全闭环
+- **建议在 data/ 目录维护一个关键词映射表**，避免散落在两个独立配置中导致不一致
+
+---
+
+## 🔥 坑46：getEffectiveTemp 双重扣减 tempOffset — 高难度下资源消耗翻倍
+
+### 问题现象
+高难度模式下（normal/hard/arctic等），电力、木柴等资源消耗异常高。4个NPC维护电力仍涨不上去。Day2 开始后NPC快速冻死。
+
+### 问题根因
+`weather-system.js` 中存在**双重 tempOffset 扣减**：
+1. `onDayChange()` 设置 `currentTemp = baseTemp - tempOffset`（第1次扣减）
+2. `getEffectiveTemp()` 返回 `currentTemp - tempOffset`（第2次扣减！）
+
+实际温度比设计值低了 `tempOffset` 度。hard难度(tempOffset=10) Day2 实际温度从-35°C变成**-50°C**，所有基于温度的资源消耗乘数都被严重放大。
+
+### 解决方案
+移除 `getEffectiveTemp()` 中的 tempOffset 扣减——`onDayChange()` 已经将 tempOffset 应用到 `currentTemp` 了。
+
+### ⚠️ 开发注意
+- **同一个修正值不能在"写入"和"读取"两端都应用**——要么在设置时减，要么在获取时减，绝不能两处都减
+- **温度/难度相关的修正值，建议统一在一个地方应用（推荐在 `onDayChange` 写入时），获取函数只做加工不做修正**
+- **每次修改影响全局数值计算的函数时，都要验证上下游是否有重复逻辑**
+
+---
+
+## 🔥 坑47：室内碰撞推挤导致NPC闪现抖动 — 碰撞系统不区分室内外
+
+### 问题现象
+多个NPC在工坊(12×8格)里疯狂闪现抖动，右侧事件列表刷屏"被推进墙壁，自动修复位置"。
+
+### 问题根因
+碰撞系统使用统一的室外参数（推力2.0、碰撞半径0.45×TILE）处理所有场景。室内空间狭小（扣除墙壁和家具后可走区域极少），多NPC挤在一起时碰撞推挤导致：
+1. 推力过强→NPC被推进家具/墙壁(solid)区域
+2. 位置修复检测到在solid→传送到附近空位
+3. 空位又和其他NPC碰撞→又被推进solid→无限循环
+4. 随机推力(nudge)在室内每帧随机方向推→视觉抖动
+5. 强制传送脱困(forceUnstuck)在室内→传送到随机空位→闪现
+
+### 解决方案
+1. **室内场景完全跳过碰撞推挤**——只做气泡偏移计算，不实际改变NPC位置
+2. 室内NPC通过座位系统(`_pickIndoorSeat`)精确定位，不需要碰撞推力分散
+3. 位置修复逻辑加5秒冷却(`_posFixCooldown`)避免每帧触发
+
+### ⚠️ 开发注意
+- **碰撞系统必须区分室内/室外场景**——室内空间太小，任何物理推挤都可能把NPC推进不可通行区域
+- **室内NPC位置由座位系统管理，碰撞系统不应干预**
+- **位置修复等安全网逻辑必须加冷却**，否则会因每帧触发导致日志刷屏和性能浪费
+
+---
+
+## 🔥 坑48：LLM串行队列堵塞高优先级请求 — 讨论系统等几分钟才发言
+
+### 问题现象
+暂停游戏打开讨论弹窗后，NPC一直显示"正在发言..."但不说话，等了好几分钟才出现第一句话。
+
+### 问题根因
+所有LLM调用（NPC AI决策 + 讨论系统 + 对话系统）共用同一个串行队列(`_llmQueuePromise`)。暂停游戏前NPC的 `think-action` 请求已经进入队列（5-6个请求，每个10-30秒）。讨论系统的请求排在队尾，要等前面所有请求处理完才轮到。
+
+### 解决方案
+新增 `callLLMDirect()` 函数——绕过串行队列直接调用LLM内部实现。讨论系统开启时游戏已暂停，不会产生新的NPC AI请求，讨论内部请求是自然串行的（一个NPC说完再说下一个），所以不需要队列保护。
+
+### ⚠️ 开发注意
+- **LLM串行队列是为了防止并发请求导致429限速，但不同优先级的请求不应混在同一个队列**
+- **高优先级请求（用户触发的讨论/对话）应该有独立通道或插队机制**
+- **设计队列系统时，要考虑"低优先级请求堆积堵塞高优先级请求"的场景**
+
+---
+
+## 🔥 坑49：_fallbackToRoleDefaultAction 缺少 _actionOverride — NPC在两个目标间死循环
+
+### 问题现象
+歆玥在废墟(43,5)和矿渣堆(43,35)之间反复来回跑，无法停下来。
+
+### 问题根因
+废墟探索3次用完后调用 `_fallbackToRoleDefaultAction`，该函数设置了 `_actionTarget = ore_pile`，但**漏了设置 `_actionOverride = true`**。导致：
+1. 日程系统的一致性检查检测到 `_actionOverride=false` 但 `_actionTarget` 存在 → 清除 `_actionTarget`
+2. 日程系统P2重新接管 → 8-12时段目标仍是 `ruins_site` → 重新导航到废墟
+3. 到达废墟 → 行动效果匹配 `explore_ruins` → 已exhausted → 又调用fallback
+4. fallback → 被清除 → 日程重导航 → **无限死循环**
+
+同时 `explore_ruins` 效果在exhausted后**每帧都会触发fallback**，加剧了循环。
+
+### 解决方案
+1. `_fallbackToRoleDefaultAction` 补全 `_actionOverride = true` 和 `_currentAction` 设置
+2. `explore_ruins` 效果新增 `_ruinsExhaustedDay` 当天标记，exhausted后不再执行探索逻辑
+3. `_ruinsFallbackDone` 确保fallback只触发一次
+
+### ⚠️ 开发注意
+- **任何设置 `_actionTarget` 的代码都必须同时设置 `_actionOverride = true`**，否则日程系统会立即清除目标
+- **`_actionOverride` 和 `_actionTarget` 是一对绑定属性，不能单独设置其中一个**
+- **行动效果中的状态切换（如exhausted）需要设置当天标记，防止每帧重复触发**
+- **fallback行为必须是一次性的（设置后不再重复触发），否则会与日程系统形成死循环**
+
+---
+
+### 45. ACTION_EFFECT_MAP 关键词必须与任务系统 stateDesc 双向同步 🆕
+NPC"做事但无效果"的根因通常是**关键词不匹配**。任务系统设置的 `stateDesc`（如"维护电力"）和行动效果系统的 `keywords`（如"维修发电机"）来自两套独立配置。**新增任务时必须同时更新两处**，否则NPC虽然到达目标场景、状态显示正确，但实际资源产出为0。（参见坑 45）
+
+### 46. 同一修正值不能在"写入"和"读取"两端都应用 🆕
+`tempOffset` 在 `onDayChange()`（写入 `currentTemp`）和 `getEffectiveTemp()`（读取时）都做了扣减，导致双重扣减。**数值修正只能在一个地方执行**——要么在设置时应用，要么在获取时应用，绝不能两处都做。每次修改影响全局数值计算的函数时，都要验证上下游是否有重复修正逻辑。（参见坑 46）
+
+### 47. 碰撞系统必须区分室内/室外场景 🆕
+室内空间太小（如12×8的工坊），碰撞推挤会把NPC推进家具/墙壁→修复位置→又被推→无限循环。**室内场景应完全跳过碰撞推挤**，室内NPC位置由座位系统管理。位置修复等安全网逻辑必须加冷却（如5秒），否则每帧触发导致日志刷屏。（参见坑 47）
+
+### 48. `_actionOverride` 和 `_actionTarget` 必须成对设置 🆕
+任何设置 `_actionTarget` 的代码都必须同时设置 `_actionOverride = true`，否则日程系统会立即清除目标。这两个属性是一对绑定关系：`_actionOverride` 是”锁”，`_actionTarget` 是”目标”。只设目标不上锁 = 目标会被立刻覆盖。只上锁不设目标 = 锁着但不知道去哪。**特别注意 fallback 行为——它必须是一次性设置后不再重复触发，否则会与日程系统形成死循环。**（参见坑 49）
+
+---
+
+## 🔥 坑50：多系统同时控制NPC — 缺乏统一仲裁导致行为互相覆盖
+
+### 问题现象
+NPC 在执行投票决策任务时被日程系统重新导航到原来的日程目标；P0 紧急恢复后日程超时兜底把 NPC 传送走；stateOverride=sick 途中触发 P0 health_critical 导致进门出门死循环。
+
+### 问题根因
+npc-schedule.js 的 P2 日程层有十几处”是否跳过”判断，每处都是独立的 `if (this._actionOverride)` / `if (this._stateOverride)` 硬编码。新增系统（taskOverride、councilTask、companion）时如果漏了某处，就会被日程反向接管。根本原因是**没有统一的”谁在控制NPC”仲裁机制**。
+
+### 解决方案
+新增 `_getScheduleControl()` 返回统一的控制信号对象，包含 `{ owner, priority, reason, blocksSchedule, canRetargetFromSchedule, canRetryScheduleNavigation, canRecoverTimeout, canUseDoorSafetyNet, canCorrectArrivalOffset, canRunPostArrivalBehavior }`。P2 日程层的所有分支判断统一查询这个对象，不再直接检查各种 override 标志。
+
+### ⚠️ 开发注意
+- **每新增一个NPC控制系统，只需在 `_getScheduleControl()` 中加一个判断分支**，所有日程保护逻辑自动生效
+- **P2日程只在 `scheduleControl.canXxx` 为 true 时才执行相应操作**
+- **优先级链：P0 > stateOverride > 治疗 > taskOverride > actionOverride > companion > P2**
+- **绝对不能让低优先级系统在高优先级激活时执行”超时兜底”或”安全网进门”等回收操作**
+
+---
+
+## 🔥 坑51：activateTaskOverride 不支持自定义 stateDesc — 建造任务永远不触发
+
+### 问题现象
+HUD显示”发电机：待建造”，进度从未动过。NPC被分配了 BUILD_GENERATOR 任务，到达工坊，但 stateDesc 显示”执行任务中...”而不是”建造发电机”。
+
+### 问题根因
+三层断裂组合：
+1. `task-system._assignTasks()` 只建立映射（`npcAssignments[npcId] = taskId`），从未调用 `activateTaskOverride()` 驱动物理移动
+2. `activateTaskOverride()` 在 line 1549-1552 硬编码了 `resourceNames` 映射，BUILD_GENERATOR 的 `resourceType=null`，stateDesc 被设为通用的”前往执行任务”
+3. `_getTaskOverrideDesc()` 到达后返回”执行任务中...”，action-effects 永远匹配不上”建造发电机”关键词
+
+**对比 council 路径（能工作）**：council 额外手动设了 `npc._councilStateDesc = matched.stateDesc`，但这是特殊处理不是通用机制。
+
+### 解决方案
+把 stateDesc 变成 `activateTaskOverride()` 的标准参数（第5个），存到 `_taskOverride.stateDesc`，`_getTaskOverrideDesc()` 统一从 `override.stateDesc` 取值，`_actionDecision()` 在 taskOverride 活跃时跳过 LLM 决策。所有调用方（task-system、council-system）都通过同一接口传入 stateDesc。
+
+### ⚠️ 开发注意
+- **stateDesc 是 action-effects 匹配关键词的唯一来源**，不正确的 stateDesc = 效果不触发 = 任务永远不完成
+- **新增任务类型时必须确保 `TASK_DETAILS[type].name` 包含 ACTION_EFFECT_MAP 中的匹配关键词**
+- **LLM 行动决策会覆盖 stateDesc**，必须在 taskOverride 激活时跳过决策，否则关键词丢失
+- **不要为特定系统做 stateDesc 特殊处理（如 `_councilStateDesc`），而应走统一的 `_taskOverride.stateDesc` 管道**
+
+---
+
+## 🔥 坑52：P0紧急与stateOverride冲突 — 两个系统交替控制导致进出门死循环
+
+### 问题现象
+NPC 在建筑门口反复进出，日志刷屏”进入medical” → “离开medical” → “进入medical”。
+
+### 问题根因
+NPC 处于 `stateOverride=sick`，正在前往医疗站。途中健康继续下降，低于 P0 `health_critical` 阈值。P0 层把目标改为宿舍（回家休息），但 stateOverride 层检测到不在医疗站又重新导航到医疗站。两个系统交替控制 NPC，每帧切换目标。
+
+### 解决方案
+P0-3 健康危急检测时，如果 NPC 已处于 `stateOverride=sick`（正在去医院），跳过 P0 触发。同理 P0-7 精神危急检测时跳过 `stateOverride=mental`。逻辑是：sick/mental 本身就是在处理健康/精神问题，不需要 P0 再重复处理。
+
+### ⚠️ 开发注意
+- **两个系统如果试图解决同一个问题（健康低→去医院 vs 健康低→回宿舍），它们会冲突**
+- **新增 P0 检测项时，必须检查是否有 stateOverride 已经在处理相同问题**
+- **规则：如果某个 stateOverride 的目的就是解决当前危机，P0 不应重复触发**
+
+---
+
+## 🔥 坑53：5倍速下NPC抖动/超时提前触发 — 游戏时间与真实时间混用
+
+### 问题现象
+把游戏切到 5 倍速后，NPC 会明显出现以下异常：
+- 刚出门、刚进屋、刚让路，保护期很快结束
+- LLM 行动决策触发过于频繁，NPC 像“神经过敏”一样频繁换目标
+- 卡住检测、旅行超时、导航兜底比正常速度更容易触发
+- 某些系统明显被加速，某些系统又像正常速度，整体表现撕裂
+
+### 问题根因
+项目里同时存在两类完全不同的计时语义：
+
+1. **世界推进计时器**：资源生产/消耗、属性演化、位移、昼夜流逝。这些本来就应该跟随倍速走。
+2. **安全计时器**：冷却、保护期、卡住检测、导航超时、行为锁、发呆兜底。这些应该按真实秒数计算。
+
+如果把这两类计时器都统一用 `dt * speedMultiplier` 或 `gameTime` 处理，就会出现高倍速下安全机制被一起压缩的问题。结果不是“推进更快”，而是“系统更容易失控”。
+
+### 解决方案
+建立统一双时间语义：
+- **游戏时间**：只给资源/属性/移动/昼夜等世界推进逻辑使用
+- **真实时间**：只给冷却/保护期/卡住/超时/行为锁/兜底逻辑使用
+
+具体落地：
+- `game.js` 缓存每帧真实 `dt`
+- `npc.js` 中行为锁、AI冷却、休息缓冲、让路、碰撞衰减、路径卡住检测改为真实时间
+- `npc-ai.js` 中决策冷却、行动卡住、旅行超时、发呆看门狗改为真实时间
+- `npc-schedule.js` / `npc-attributes.js` 中导航超时与 stateOverride 超时改为真实时间
+
+### ⚠️ 开发注意
+- **不要把所有计时器都默认理解成“跟倍速一起走”**，先判断它属于“世界推进”还是“安全计时”
+- **凡是冷却/保护/超时/兜底，都优先考虑真实时间**
+- **凡是资源变化/属性变化/位移推进/昼夜流逝，才应该考虑游戏时间**
+- **高倍速适配不是简单把所有 `dt` 都乘倍率，而是先明确每个计时器的语义归属**
+- **新增计时器时必须先回答一句话：它是让世界更快，还是防止系统失控？**
+
+---
+
+### 49. 多系统控制NPC必须有统一仲裁机制 🆕
+不同系统（P0/stateOverride/taskOverride/actionOverride/日程/饥饿/同伴）同时试图控制NPC时，**必须有一个集中查询点判断”谁在控制”**。分散在各处的 `if (this._xxxOverride)` 判断会随着系统增多变得不可维护——每新增一个系统就要修改十几处判断。`_getScheduleControl()` 模式：集中定义优先级链，下游只查控制信号不直接检查标志位。（参见坑 50）
+
+### 50. stateDesc是action-effects匹配的唯一桥梁 🆕
+action-effects通过 `stateDesc.includes(keyword)` 匹配效果类型。如果 `activateTaskOverride()` 不支持传入 stateDesc，或者 LLM 行动决策在任务执行中覆盖了 stateDesc，效果匹配就断了——NPC人到了、场景对了，但就是不产出。**解法：stateDesc 作为 taskOverride 的标准参数，与 taskId 同生命周期；taskOverride 激活时跳过 LLM 决策。**（参见坑 51）
+
+### 51. 两个系统解决同一个问题会互相冲突 🆕
+P0 health_critical → 回宿舍休息；stateOverride=sick → 去医院治疗。两者都在处理”健康低”，但目标不同。如果不互相感知，就会交替控制NPC导致死循环。**新增 P0/stateOverride 时，必须检查对方是否已在处理同一问题，如果是则让先发者继续。**（参见坑 52）
+
+重要prompt，不能删：
+“不是你这个修改不行啊，你这样只是一个暂时的修改，不能起到真
+正的通用，一定要记住通用，优雅，你要先想想重构的那些原则，不能这样修一个bug冒出来一个bug，这样我们
+永远修不好，你想好我们到底是要做一个什么样的游戏，你现在清楚吗，”
+“我们是要做一个8个ai在末日自主决策生活的游戏，我们想要看到他们能够自己决策思考对话，然后不断轮回，不断思考讨论来修正自己的决策直到全员存活这样的一个游戏。你不能让我看一个bug你改一个bug，这样效率太低了。你要时刻记得我们这个伟大的使命，我们是要做一个非常伟大的游戏，让世界都对我们刮目相看！然后也要让玩家感受到这个时代最新的ai游戏应该是多么有意思！你要牢记，每次做完一个工作，你都要思考，离我们这个伟大的愿景是不是更近了一大步。 你要从大局出发 “
+
+### 52

@@ -45,13 +45,67 @@ class ResourceSystem {
     constructor(game) {
         this.game = game;
 
-        // 三种核心资源池（应用难度系数）
+        // 三种核心资源池（难度系数 + 总量守恒随机分配）
         const diff = (game && game.difficulty) ? game.difficulty : GST.getDifficulty();
         const initMult = diff.initialResources || { woodFuel: 1, food: 1, power: 1 };
-        this.woodFuel = Math.round(RESOURCE_DEFAULTS.woodFuel * (initMult.woodFuel || 1));
-        this.food = Math.round(RESOURCE_DEFAULTS.food * (initMult.food || 1));
-        this.power = Math.round(RESOURCE_DEFAULTS.power * (initMult.power || 1));
-        console.log(`[ResourceSystem] 难度=${diff.name}, 初始资源: 木柴${this.woodFuel} 食物${this.food} 电力${this.power}`);
+
+        // 【总量守恒随机分配】
+        // 设计思路：总预算由难度决定，但三种资源的分配比例每局随机
+        // "此消彼长" —— 这世木柴多食物少，下世可能食物多电力少
+        //
+        // 算法：
+        // 1. 算出难度下每种资源的标准值
+        // 2. 转化为统一"预算点"（按标准值归一化）
+        // 3. 生成3个随机偏移（和为0），让资源在标准值±30%间浮动
+        // 4. 保证每种资源不低于标准值的50%（极端保底）
+
+        const stdWood = RESOURCE_DEFAULTS.woodFuel * (initMult.woodFuel || 1);
+        const stdFood = RESOURCE_DEFAULTS.food * (initMult.food || 1);
+        const stdPower = RESOURCE_DEFAULTS.power * (initMult.power || 1);
+        const totalBudget = stdWood + stdFood + stdPower; // 难度决定的总预算
+
+        // 生成3个随机权重，归一化后乘以总预算
+        // 权重以标准值为中心，加入随机扰动
+        const jitter = () => 0.7 + Math.random() * 0.6; // [0.7, 1.3]
+        let wW = stdWood * jitter();
+        let wF = stdFood * jitter();
+        let wP = stdPower * jitter();
+        const wSum = wW + wF + wP;
+
+        // 按权重比例分配总预算
+        let allocWood = totalBudget * (wW / wSum);
+        let allocFood = totalBudget * (wF / wSum);
+        let allocPower = totalBudget * (wP / wSum);
+
+        // 保底：每种资源不低于标准值的50%
+        const floorWood = stdWood * 0.5;
+        const floorFood = stdFood * 0.5;
+        const floorPower = stdPower * 0.5;
+        allocWood = Math.max(allocWood, floorWood);
+        allocFood = Math.max(allocFood, floorFood);
+        allocPower = Math.max(allocPower, floorPower);
+
+        // 保底后重新按比例缩放回总预算（确保总量不变）
+        const allocSum = allocWood + allocFood + allocPower;
+        const scale = totalBudget / allocSum;
+        allocWood *= scale;
+        allocFood *= scale;
+        allocPower *= scale;
+
+        this.woodFuel = Math.round(allocWood);
+        this.food = Math.round(allocFood);
+        this.power = Math.round(allocPower);
+
+        // 保存分配信息用于UI和日志
+        this._initStandard = { woodFuel: stdWood, food: stdFood, power: stdPower };
+        this._initRandomFactors = {
+            woodFuel: this.woodFuel / stdWood,
+            food: this.food / stdFood,
+            power: this.power / stdPower
+        };
+        console.log(`[ResourceSystem] 难度=${diff.name}, 总预算=${Math.round(totalBudget)}`);
+        console.log(`[ResourceSystem] 标准值: 木柴${Math.round(stdWood)} 食物${Math.round(stdFood)} 电力${Math.round(stdPower)}`);
+        console.log(`[ResourceSystem] 随机分配: 木柴${this.woodFuel}(×${(this.woodFuel/stdWood).toFixed(2)}) 食物${this.food}(×${(this.food/stdFood).toFixed(2)}) 电力${this.power}(×${(this.power/stdPower).toFixed(2)})`);
 
         // 【v2.0】天气消耗乘数缓存
         this._weatherConsumptionMult = { wood: 1.0, power: 1.0, food: 1.0 };
@@ -228,6 +282,12 @@ class ResourceSystem {
         // 【v2.0】获取天气消耗乘数
         const weatherMult = this._getWeatherConsumptionMult();
 
+        // 【v4.1】存活人数缩减系数：人少了，需要供暖/用电的区域缩小
+        // 公式：max(0.3, aliveCount / totalCount)，最低保底30%（空房间仍有基础维护消耗）
+        const totalNpcCount = this.game.npcs ? this.game.npcs.length : 8;
+        const aliveNpcCount = this.game.npcs ? this.game.npcs.filter(n => !n.isDead).length : 8;
+        const populationRatio = Math.max(0.3, aliveNpcCount / totalNpcCount);
+
         // 1) 暖炉消耗木柴（通过FurnaceSystem管理），应用天气乘数
         const furnaceSystem = this.game.furnaceSystem;
         if (furnaceSystem) {
@@ -237,13 +297,9 @@ class ResourceSystem {
                 // 【难度系统】木柴消耗乘以难度倍率
                 const diffConsWood = this.game.getDifficultyMult ? this.game.getDifficultyMult('consumptionMult') : null;
                 const diffWoodMult = (diffConsWood && diffConsWood.wood) ? diffConsWood.wood : 1.0;
-                let woodNeeded = baseWood * weatherMult.wood * diffWoodMult;
+                let woodNeeded = baseWood * weatherMult.wood * diffWoodMult * populationRatio; // 【v4.1】人少消耗降低
 
-                // 【燃料节约】有NPC在维护暖炉时，木柴消耗减少10%
-                if (this.game._furnaceFuelSaving) {
-                    woodNeeded *= 0.9;
-                    this.game._furnaceFuelSaving = false; // 每帧重置，下一帧若无人维护则恢复正常消耗
-                }
+                // 维护暖炉已移除（v4.13: 暖炉是被动系统，自动燃烧消耗木柴，不需要人维护）
 
                 // 【仓库管理】有NPC在执行reduce_waste效果时，木柴浪费减少10%
                 if (this.game._woodWasteReduction) {
@@ -267,12 +323,12 @@ class ResourceSystem {
             }
         }
 
-        // 2) 发电机消耗电力，应用天气乘数
+        // 2) 发电机消耗电力，应用天气乘数 + 人口缩减系数
         const basePower = RESOURCE_CONSUMPTION.powerPerHour * hourFraction;
         // 【难度系统】电力消耗乘以难度倍率
         const diffConsPower = this.game.getDifficultyMult ? this.game.getDifficultyMult('consumptionMult') : null;
         const diffPowerMult = (diffConsPower && diffConsPower.power) ? diffConsPower.power : 1.0;
-        const powerNeeded = basePower * weatherMult.power * diffPowerMult;
+        const powerNeeded = basePower * weatherMult.power * diffPowerMult * populationRatio; // 【v4.1】人少消耗降低
         this.consumeResource('power', powerNeeded, '发电机');
     }
 
@@ -545,9 +601,10 @@ class ResourceSystem {
             nextFoodMult = 1.0; // 食物消耗不受温度影响
         }
 
-        const estimatedWood = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount * 24 * nextWoodMult;
+        const popRatio = this.getPopulationRatio();
+        const estimatedWood = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount * 24 * nextWoodMult * popRatio;
         const estimatedFood = aliveCount * RESOURCE_CONSUMPTION.foodPerMealPerPerson * RESOURCE_CONSUMPTION.mealsPerDay * nextFoodMult;
-        const estimatedPower = RESOURCE_CONSUMPTION.powerPerHour * 24 * nextPowerMult;
+        const estimatedPower = RESOURCE_CONSUMPTION.powerPerHour * 24 * nextPowerMult * popRatio;
 
         const report = {
             day: dayNum,
@@ -698,12 +755,14 @@ class ResourceSystem {
     getWoodFuelHoursRemaining() {
         const furnaceCount = this.game.furnaceSystem ? this.game.furnaceSystem.getActiveFurnaceCount() : 1;
         if (furnaceCount === 0) return Infinity;
-        return this.woodFuel / (RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount);
+        const hourly = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount * this.getPopulationRatio();
+        return hourly > 0 ? this.woodFuel / hourly : 999;
     }
 
     /** 获取电力剩余小时 */
     getPowerHoursRemaining() {
-        return this.power / RESOURCE_CONSUMPTION.powerPerHour;
+        const hourly = RESOURCE_CONSUMPTION.powerPerHour * this.getPopulationRatio();
+        return hourly > 0 ? this.power / hourly : 999;
     }
 
     /** 是否有任何资源危机 */
@@ -740,6 +799,12 @@ class ResourceSystem {
         status += `电力${Math.round(this.power)}(剩${powerH === Infinity ? '∞' : Math.round(powerH)}h) `;
         status += `废墟探索(今日剩${RUINS_MAX_EXPLORES_PER_DAY - this.ruinsExploresToday}次)`;
 
+        // 自动化机器状态
+        if (this.game.machineSystem) {
+            const ms = this.game.machineSystem;
+            status += ` | ${ms.getMachineStatusForPrompt()}`;
+        }
+
         if (this.hasAnyCrisis()) {
             status += ' ⚠️危机:';
             if (this.crisisFlags.noFood) status += '无食物!';
@@ -750,10 +815,17 @@ class ResourceSystem {
         return status;
     }
 
+    /** 【v4.1】获取存活人口缩减系数（人少了消耗降低，最低30%） */
+    getPopulationRatio() {
+        const total = this.game.npcs ? this.game.npcs.length : 8;
+        const alive = this.game.npcs ? this.game.npcs.filter(n => !n.isDead).length : 8;
+        return Math.max(0.3, alive / total);
+    }
+
     /** 【新增】获取木柴可烧小时数 */
     getWoodFuelHoursRemaining() {
         const furnaceCount = this.game.furnaceSystem ? this.game.furnaceSystem.getActiveFurnaceCount() : 1;
-        const hourlyConsumption = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount;
+        const hourlyConsumption = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount * this.getPopulationRatio();
         return hourlyConsumption > 0 ? this.woodFuel / hourlyConsumption : 999;
     }
 
@@ -766,7 +838,8 @@ class ResourceSystem {
 
     /** 【新增】获取电力可用小时数 */
     getPowerHoursRemaining() {
-        return RESOURCE_CONSUMPTION.powerPerHour > 0 ? this.power / RESOURCE_CONSUMPTION.powerPerHour : 999;
+        const hourly = RESOURCE_CONSUMPTION.powerPerHour * this.getPopulationRatio();
+        return hourly > 0 ? this.power / hourly : 999;
     }
 
     /** 【新增】获取各资源的紧张等级 */
@@ -774,10 +847,11 @@ class ResourceSystem {
         const aliveCount = this.game.npcs.filter(n => !n.isDead).length;
         const furnaceCount = this.game.furnaceSystem ? this.game.furnaceSystem.getActiveFurnaceCount() : 1;
 
-        // 每天消耗量估算
-        const dailyWood = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount * 24;
+        // 每天消耗量估算（【v4.1】应用人口缩减系数）
+        const popRatio = this.getPopulationRatio();
+        const dailyWood = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount * 24 * popRatio;
         const dailyFood = aliveCount * RESOURCE_CONSUMPTION.foodPerMealPerPerson * RESOURCE_CONSUMPTION.mealsPerDay;
-        const dailyPower = RESOURCE_CONSUMPTION.powerPerHour * 24;
+        const dailyPower = RESOURCE_CONSUMPTION.powerPerHour * 24 * popRatio;
 
         const woodHours = this.getWoodFuelHoursRemaining();
         const foodMeals = this.getFoodMealsRemaining();
@@ -873,10 +947,12 @@ class ResourceSystem {
             const currentHour = this.game.getHour ? this.game.getHour() : 12;
             const furnaceCount = this.game.furnaceSystem ? this.game.furnaceSystem.getActiveFurnaceCount() : 1;
             const aliveCount = this.game.npcs ? this.game.npcs.filter(n => !n.isDead).length : 8;
+            const totalCount = this.game.npcs ? this.game.npcs.length : 8;
+            const popRatio = Math.max(0.3, aliveCount / totalCount); // 【v4.1】人口缩减系数
 
-            const woodPerHour = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount;
+            const woodPerHour = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount * popRatio;
             const foodPerDay = aliveCount * RESOURCE_CONSUMPTION.foodPerMealPerPerson * RESOURCE_CONSUMPTION.mealsPerDay;
-            const powerPerHour = RESOURCE_CONSUMPTION.powerPerHour;
+            const powerPerHour = RESOURCE_CONSUMPTION.powerPerHour * popRatio;
 
             // 温度标签映射
             const tempLabels = { 1: '0°C', 2: '-30°C', 3: '0°C', 4: '-60°C' };

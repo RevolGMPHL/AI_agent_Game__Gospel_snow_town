@@ -51,6 +51,15 @@ async function callLLM(systemPrompt, userPrompt, maxTokens = 500) {
     return result;
 }
 
+/**
+ * 直接调用LLM（绕过串行队列）
+ * 供讨论系统等高优先级场景使用——游戏暂停时NPC AI不再产生新请求，
+ * 但已排入队列的请求会堵塞讨论系统。用这个函数可以立即发送请求。
+ */
+async function callLLMDirect(systemPrompt, userPrompt, maxTokens = 500) {
+    return await _callLLMInternal(systemPrompt, userPrompt, maxTokens);
+}
+
 async function _callLLMInternal(systemPrompt, userPrompt, maxTokens = 500) {
     // 【保护】如果连续失败超过10次，暂停60秒避免无意义请求
     if (LLM_STATUS.consecutiveFails >= 10) {
@@ -285,6 +294,7 @@ function parseLLMJSON(text) {
 
     // 导出到 GST
     GST.callLLM = callLLM;
+    GST.callLLMDirect = callLLMDirect;  // 绕过队列的直接调用（讨论系统用）
     GST.parseLLMJSON = parseLLMJSON;
     GST.LLM_STATUS = LLM_STATUS;
     GST.LLM = {

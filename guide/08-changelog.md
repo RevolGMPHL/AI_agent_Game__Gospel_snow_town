@@ -4,6 +4,781 @@
 
 ---
 
+## v4.15 — 5倍速整体适配：统一游戏时间与真实时间语义 (2026-03-21)
+
+### 🎯 核心改动：高倍速下保持“推进更快”，但不让安全计时器失真
+
+**设计理念**：5倍速应该让游戏的宏观推进更快（资源变化更快、昼夜更快、行动推进更快），但不应该让“冷却、保护期、卡住检测、导航超时、行为锁”等安全机制也同步缩短为 1/5。否则 NPC 会在高倍速下表现出抖动、频繁重规划、刚出门就被判超时、任务被过早打断等异常。
+
+### 📝 具体改动
+
+#### 1. `src/core/game.js` — 建立真实时间入口，碰撞卡住计时不再写死 `0.016`
+
+- 在 `update(dt)` 中缓存每帧的真实 `dt` 与游戏 `dt`
+- `collisionStallTimer` 改为使用真实时间累积
+- 消除原先依赖固定帧率的写法，避免 5 倍速和低帧率叠加时计时失真
+
+#### 2. `src/npc/npc.js` — NPC 主循环中的安全计时器统一改为真实时间
+
+- 行为锁 `startTime` / 超时判断改为真实时间
+- `aiCooldown`、`_restCooldownTimer`、`_yieldTimer`、`stuckTimer`、`collisionStallTimer` 衰减、聊天紧急检查、亲和冷却等统一切到真实时间
+- 保留体力恢复、位移推进等应该跟随游戏倍速的行为推进逻辑
+
+#### 3. `src/npc/npc-ai.js` — 行动决策冷却与兜底超时真实时间化
+
+- `_actionDecisionCooldown` 改为真实时间递减，避免 5 倍速下 LLM 思考频率暴涨
+- `_actionStuckTimer`、`_actionTravelTimer`、`_idleWatchdogTimer` 改为真实时间
+- 发呆恢复任务与 pending intent 恢复改走统一仲裁入口，不再被 taskOverride 硬阻塞
+
+#### 4. `src/npc/npc-schedule.js` / `src/npc/npc-attributes.js` — 导航超时与状态覆盖超时统一真实时间
+
+- `_scheduleNavTimer`、`_taskOverrideTravelTimer` 改为真实时间
+- `_stateOverrideStuckTimer`、`_stateOverrideTravelTimer` 改为真实时间
+- 这样 5 倍速下“就医/回家/任务导航”仍按现实秒数判断是否卡住或超时，不会被提前 5 倍触发
+
+### ✅ 最终统一规则
+
+| 类型 | 时间语义 | 说明 |
+|------|----------|------|
+| 资源生产/消耗、属性演化、移动推进 | **游戏时间** | 5倍速下理应更快推进 |
+| 冷却、保护期、卡住检测、导航超时、行为锁、发呆兜底 | **真实时间** | 防止高倍速下安全机制失真 |
+
+### 🐛 解决的问题
+
+- 5倍速下 `LLM` 决策过于频繁，NPC 像“神经过敏”一样频繁换目标
+- 刚出门、刚让路、刚进屋时保护期和缓冲期过早结束
+- 导航超时、卡住检测、碰撞脱困在高倍速下被提前触发
+- 行为锁和恢复兜底与资源/移动使用同一时间语义，导致系统表现撕裂
+
+### 📝 代码改动
+
+- `src/core/game.js`: 缓存 `_lastRealDt` / `_lastGameDt`；碰撞卡住计时改为真实时间
+- `src/npc/npc.js`: 行为锁、休息缓冲、AI冷却、让路、路径卡住、碰撞衰减等真实时间化
+- `src/npc/npc-ai.js`: 决策冷却、行动卡住、旅行超时、发呆看门狗真实时间化；放宽 taskOverride 对意图恢复的硬阻塞
+- `src/npc/npc-schedule.js`: 日程导航超时、任务覆盖旅行超时真实时间化；任务暂停/恢复统一走标准入口
+- `src/npc/npc-attributes.js`: stateOverride 卡住与超时真实时间化
+
+---
+
+## v4.14 — 去除白天日程，LLM全权行动决策 (2026-03-20)
+
+### 🎯 核心改动：白天行为由LLM驱动，日程只管睡觉
+
+**设计理念**：NPC是有自主意志的角色，白天的行动不应该被固定日程表驱动。日程表机械地按时段导航NPC到指定位置，玩家看到的只是NPC按部就班的移动，缺乏"AI在自主思考和生活"的感觉。
+
+**改动前**：
+```
+update → _updateSchedule(P2日程) → 每个时段根据scheduleTemplate导航NPC → LLM决策几乎不被触发（只在对话结束后和空闲兜底时）
+```
+
+**改动后**：
+```
+update → _updateSchedule(P0紧急+P1任务+睡觉日程) → _actionDecision(LLM) → NPC白天完全由LLM自主决策去哪里做什么
+```
+
+### 📝 具体改动
+
+#### 1. `src/npc/npc.js` — 在update循环中加入LLM决策定时调用
+
+- 在 `_updateSchedule` 之后、`_updateIdleWatchdog` 之前，新增 `_actionDecision` 的定时调用
+- 当 `_actionDecisionCooldown <= 0` 时自动触发LLM决策
+- 决策基础间隔从 **45~75秒** 缩短为 **25~45秒**（因为现在是白天行为的唯一驱动力）
+
+#### 2. `src/npc/npc-schedule.js` — P2日程层改为只管睡觉
+
+- 新增 `isBedtime` 和 `isSleepSchedule` 判断
+- **白天（6:00~22:00）非睡觉日程**：跳过P2日程导航，交给LLM自主决策
+- **夜间（22:00~6:00）睡觉日程**：保持原有日程导航（回宿舍睡觉）
+- **P0（生存紧急）和 P1（任务驱动）完全不变**
+- 饥饿系统、进屋安全网、超时兜底等都不受影响
+
+#### 3. `src/npc/npc-ai.js` — LLM决策增强
+
+- **夜间保护**：22:00~6:00不触发LLM决策（除非身体极差需要紧急决策）
+- **动态间隔加速**：危险时10~20秒、资源紧张时15~30秒
+- **Prompt优化**：
+  - 日程从"仅供参考"改为明确提示"你可以完全自主决定做什么"
+  - 夜间提示回家休息
+  - 白天提示自主行动（采集/工作/社交/探索）
+  - 优先级描述更新：生存 > 任务 > 健康 > **自主行动**（替代"日常日程"）
+
+### ⚠️ 保留的机制
+
+| 机制 | 状态 | 说明 |
+|------|------|------|
+| P0 紧急层 | ✅ 完全保留 | 体温/健康/体力危急时的紧急处理 |
+| P1 任务层 | ✅ 完全保留 | taskOverride/council任务驱动 |
+| 睡觉日程 | ✅ 保留 | 22:00~6:00的scheduleTemplate睡觉条目 |
+| 饥饿系统 | ✅ 完全保留 | 饿了自动去吃饭 |
+| 空闲兜底 | ✅ 保留 | 20秒发呆→_fallbackToRoleDefaultAction |
+| scheduleTemplate数据 | ✅ 保留 | LLM prompt中作为"参考"展示 |
+| 白天日程导航 | ❌ 移除 | 不再根据时段驱动NPC移动 |
+
+---
+
+## v4.13 — 移除暖炉维护 + 修复决策被打断Bug (2026-03-20)
+
+### 🔥 移除暖炉维护行动
+
+**设计理念**：暖炉是被动系统，自动燃烧消耗木柴，不需要人维护。"维护暖炉"在玩家眼里看不到任何可见效果（没有进度条、没有状态变化），却占用AI决策空间，还会让NPC挂在嘴上说"要去维护暖炉"。
+
+**清理范围**（8个文件）：
+
+| 文件 | 清理内容 |
+|------|---------|
+| `data/action-effects.js` | 删除`furnace_maintain`效果映射条目 + `build_progress`暖炉修复条目 |
+| `src/npc/action-effects.js` | 删除`furnace_maintain` case执行代码（体温+50%/体力+20%/柴耗-30%）+ 气泡代码 |
+| `src/npc/specialty.js` | 删除`furnace_maintain`专长描述和乘数计算 |
+| `src/npc/npc-attributes.js` | 从体力型角色判断中移除`furnace_maintain` |
+| `src/npc/npc-schedule.js` | 删除'暖炉/维护暖炉/加柴'关键词映射 |
+| `src/npc/npc-ai.js` | 暖炉广场描述去掉"维护暖炉→减少燃料消耗" |
+| `src/systems/council-system.js` | 删除暖炉维护关键词映射 + 默认方案"维护暖炉"→"安抚士气" |
+| `src/systems/council-prompt-builder.js` | 删除"维护暖炉→柴耗-30%+暖区增强"说明 + 策略描述去掉"修暖炉" |
+| `src/systems/resource-system.js` | 删除`_furnaceFuelSaving`燃料节约代码 |
+| `src/core/input.js` | 删除`MAINTAIN_FURNACE`玩家指令 |
+| `data/npc-configs.js` | 赵铁柱日程"维护暖炉、添加柴火"→"在暖炉广场休息取暖" |
+
+### 🐛 关键Bug修复：决策让NPC去建造，但他在人工发电
+
+**根因**：`council-system.js` 的 TASK_ACTION_MAP 关键词匹配顺序错误
+
+1. **关键词匹配串台**：通用关键词"建造"被放在了一个 `stateDesc: '人工发电'` 的兜底条目里。当council分配"建造发电机"任务时，如果LLM写的任务文本只包含"建造"而不是精确的"建造发电机"，"建造"先被兜底条目命中 → stateDesc变成"人工发电"而不是"建造发电机" → action-effects匹配到人工发电效果。
+
+2. **taskOverride未阻止LLM新决策**：`_actionDecision()` 中有一行注释 `// taskOverride 不再硬跳过 LLM 决策`，导致即使taskOverride激活（council分配了任务），LLM仍然可以发起新的行动决策并覆盖stateDesc。
+
+**修复**：
+
+1. **重排关键词匹配顺序**：精确匹配（建造发电机/建造伐木机）放在前面，通用匹配（建造/建设/搭建）放在后面。通用"建造"关键词的stateDesc改为"建造发电机"而非"人工发电"。
+2. **恢复taskOverride硬保护**：`_actionDecision()` 中加回 `if (this._taskOverride && this._taskOverride.isActive) return;`，taskOverride激活时硬跳过LLM决策，防止stateDesc被覆盖。
+
+### 📝 改动文件
+
+- `src/systems/council-system.js`: 关键词匹配顺序修正、暖炉清理
+- `src/npc/npc-ai.js`: 恢复taskOverride硬保护、暖炉描述清理
+- `data/action-effects.js`: 暖炉条目清理
+- `src/npc/action-effects.js`: 暖炉效果代码清理
+- `src/npc/specialty.js`: 暖炉专长清理
+- `src/npc/npc-attributes.js`: 体力型判断清理
+- `src/npc/npc-schedule.js`: 暖炉关键词清理
+- `src/systems/resource-system.js`: 燃料节约代码清理
+- `src/systems/council-prompt-builder.js`: 暖炉prompt清理
+- `src/core/input.js`: MAINTAIN_FURNACE指令清理
+- `data/npc-configs.js`: 日程描述清理
+
+---
+
+## v4.12 — 行动系统精简：LLM决策从7选1→3选1 (2026-03-20)
+
+### 🎯 核心改动：精简LLM行动类型
+
+**设计理念**：如果一个行动在玩家眼里看不出区别，那它就不该存在。每个行动 = 一个清晰的画面 = 一个可见的结果。
+
+**文件**: `src/npc/npc-ai.js`、`src/core/input.js`
+
+#### LLM可选行动：7种 → 3种
+
+| 保留 | 说明 |
+|------|------|
+| **go_to** | 前往某地（到达后自动触发采集/工作/社交等效果） |
+| **rest** | 回家休息/睡觉 |
+| **eat** | 去炊事房吃饭 |
+
+| 移除 | 原因 |
+|------|------|
+| ~~work~~ | 等于"放弃决策交给系统"，和go_to无区别 |
+| ~~accompany~~ | 条件太苛刻几乎不触发，退化后和go_to无区别 |
+| ~~stay~~ | 执行后立即清除覆盖，玩家看不出效果 |
+| ~~wander~~ | 被Prompt和拦截器双重压制，形同虚设 |
+
+#### 智能兼容机制
+
+LLM如果仍然返回废弃类型，系统会智能纠正：
+- `work`/`wander` → 调用 `_fallbackToRoleDefaultAction()` 转为角色默认go_to
+- `stay` → 跳过，让日程系统接管
+- `accompany` + 有target → 转为 `go_to` 到目标位置
+
+#### 系统内部保留
+
+- `_executeAction` 的 switch 分支全部保留（拦截器/日程系统仍可产出这些类型）
+- `GST.NPC.ALL_ACTION_TYPES`（7种）用于系统内部
+- `GST.NPC.ACTION_TYPES`（3种）用于LLM校验
+- `_wanderToNearbyLandmark()` 保留给日程系统调用
+- `_fallbackToRoleDefaultAction()` 保留给空闲时系统调用
+
+#### Prompt优化
+
+- 行动类型说明精简为3种 + 💡提示（想找人聊天→go_to目的地，想工作→go_to工作地点）
+- JSON格式移除 companion 字段
+- 决策规则第10条和第13条更新
+- 暴风雪拦截器改为go_to回家（原为stay）
+- 白天rest拦截改为return跳过（原为改写stay）
+
+### 🔧 input.js 玩家指挥系统适配
+
+- 玩家"待命/原地"命令 → go_to furnace_plaza
+- 玩家"巡视/逛逛"命令 → go_to furnace_plaza
+- 玩家"工作/干活"命令 → go_to workshop_door
+- COMMANDER_LLM_INTENT_LIBRARY 中 WORK/STAY/WANDER 映射更新
+
+### 📝 代码改动
+
+- `src/npc/npc-ai.js`: ACTION_TYPES精简、新增ALL_ACTION_TYPES、Prompt重写、校验逻辑增加智能纠正、拦截器更新
+- `src/core/input.js`: 玩家命令映射更新、target校验逻辑更新
+
+---
+
+## v4.11.1 — 讨论结束San恢复 + 暖炉维护文档校正 (2026-03-16)
+
+### 🔧 CouncilSystem：讨论结束统一恢复 San
+
+**文件**: `src/systems/council-system.js`
+
+- 普通讨论结束后，在进入投票前对所有参与会议且存活的成员统一恢复一次 San
+- `继续讨论` 分支也走同一结算，避免普通讨论与继续讨论行为不一致
+- 使用 `_discussionSanRecovered` 防重，确保同一场会议不会通过多次“继续讨论”反复刷 San
+- 恢复量按难度递减：easy=15、normal=13、hard=12、harder=10、arctic=7、hell=5
+- 会议面板会追加系统提示，并向事件日志写入简要记录
+
+### 📝 Guide 同步
+
+**文件**: `guide/04-attributes.md`、`guide/03-npc.md`、`guide/guide.md`
+
+- 在 San 恢复途径中补充“讨论结束”一次性恢复说明
+- 将暖炉维护效果修正为与当前代码一致：**柴耗-30% + 暖区增强**
+- 更新 guide 总览版本号为 `v4.11.1`
+
+## v4.11 — 投票决策系统 + 自动化机器 + 统一行为仲裁 + 大量Bug修复 (2026-03-16)
+
+### 🆕 新系统：投票决策系统 (CouncilSystem)
+
+**文件**: `src/systems/council-system.js`（1151行）、`src/systems/council-prompt-builder.js`（680行）
+
+NPC 集体投票决策系统，通过 LLM 驱动的多轮讨论和投票选出最优生存方案：
+- **触发方式**：资源危机自动触发（`checkResourceCrisisTrigger()`）、NPC死亡自动触发（`death-system.js`）、手动触发
+- **流程**：老钱（或存活领袖）提出2-3个方案 → 全体NPC轮流发言讨论 → 投票表决 → 赢家方案通过 `activateTaskOverride()` 分配到具体NPC
+- **TASK_ACTION_MAP**：将投票结果（如"砍柴"、"建造发电机"）模糊匹配映射为具体的目标位置、资源类型和 stateDesc 关键词
+- **与 NPC 系统对接**：`npc._councilTask` 记录投票分配任务、`npc._councilStateDesc` 保护关键词不被 LLM 行动决策覆盖
+- **Prompt 注入**：think/action prompt 中新增 `🗳️ 投票决策分工` 段落，NPC 优先执行投票结果
+- **过期清理**：`cleanExpiredCouncilTasks()` 在 game.update 中定期清理过期的投票任务
+
+### 🆕 新系统：自动化机器系统 (MachineSystem)
+
+**文件**: `src/systems/machine-system.js`（473行）
+
+自动发电机和自动伐木机，由 NPC 建造完成后自动运行：
+- **自动发电机**：建造耗时 14400 游戏秒，建成后自动产电 5/h（消耗木柴 1/h）
+- **自动伐木机**：建造耗时 21600 游戏秒，建成后自动产柴 6/h（消耗电力 1.5/h）
+- **建造流程**：NPC 到达工坊 → stateDesc 匹配 `建造发电机`/`建造伐木机` → action-effects 触发 `build_machine` → MachineSystem 驱动进度
+- **多人协作**：多个 NPC 同时在工坊可加速建造（`buildWorkers` 数组）
+- **跳夜补算**：`_skipNightMachineCalc()` 在跳夜期间模拟机器运行
+- **HUD 显示**：发电机/伐木机建造进度、运行状态、产出速率在 HUD 面板展示
+- **任务类型**：`BUILD_GENERATOR`（urgent 优先分配给王策）、`BUILD_LUMBER_MILL`（high 分配给清璇）
+
+### 🔧 核心架构改进：统一行为仲裁机制
+
+**文件**: `src/npc/npc-schedule.js`（新增 `_getScheduleControl()`）
+
+解决长期存在的"多系统同时控制NPC导致互相覆盖"问题，建立统一的行为优先级仲裁：
+- **`_getScheduleControl()`**：返回当前控制方（owner）、优先级（P0/P1/P2）、是否阻塞日程（blocksSchedule）、是否允许重定向（canRetargetFromSchedule）等控制信号
+- **优先级链**：P0紧急 > stateOverride(sick/mental) > 治疗中 > taskOverride > actionOverride > 同伴跟随 > P2日程
+- **消除硬编码**：原来分散在各处的 `if (this._actionOverride)` / `if (this._stateOverride)` 判断统一收敛到 `scheduleControl` 对象
+- **5 个控制信号**：`canRetargetFromSchedule`（日程能否改目标）、`canRetryScheduleNavigation`（日程能否重试导航）、`canRecoverTimeout`（日程超时兜底是否允许）、`canUseDoorSafetyNet`（进门安全网是否允许）、`canCorrectArrivalOffset`（到达偏移修正是否允许）、`canRunPostArrivalBehavior`（环境感知是否允许）
+
+### 🔧 核心改进：统一 taskOverride stateDesc 管道
+
+**根因**：发电机/伐木机永远不被建造。task-system 只建映射不驱动导航；`activateTaskOverride()` 不支持自定义 stateDesc；LLM 决策可在任务期间覆盖 stateDesc。
+
+**修复**：
+- `activateTaskOverride()` 新增第5参数 `stateDesc`，存入 `_taskOverride.stateDesc`，与 taskId 同生命周期
+- `_getTaskOverrideDesc()` 优先级链：`override.stateDesc` > `_councilStateDesc` > resourceType 映射 > 默认
+- `_actionDecision()` 在 taskOverride 活跃时跳过 LLM 决策
+- task-system 的 `_activateDailyTaskNavigation()` 传入 `detail.name` 作为 stateDesc
+- council-system 通过同一接口传入 `matched.stateDesc`
+
+**改动**: `npc-schedule.js`、`npc-ai.js`、`task-system.js`、`council-system.js`
+
+### 🔧 核心改进：户外安全门控统一
+
+**新增** `canSafelyGoOutdoor()` 统一判断 NPC 能否安全出门：
+- 检查体温（<36.5°C 不出门）、精神（<55 不出门）、体力（<45 不出门）、健康（<40 不出门）
+- 检查天气（暴风雪禁止）、户外冷却期（P0 恢复后 30s 缓冲）
+- P0 紧急状态自身的导航不受限（如 health_critical 需出门去医疗站）
+- 替代之前分散在各处的单独天气检查和 P0 类型枚举
+
+### 🐛 Bug 修复
+
+#### 1. 任务系统只建映射不驱动导航
+**问题**：`_assignTasks()` 设了 `npcAssignments[npcId] = taskId`，但从未调用 `activateTaskOverride()` 让 NPC 物理移动。
+**修复**：新增 `_activateDailyTaskNavigation()` 方法，在 `_assignTasks()` 后立即调用，遍历分配结果对每个 NPC 调用 `activateTaskOverride()`。
+**改动**：`src/systems/task-system.js`
+
+#### 2. _door 类型任务位置校验错误
+**问题**：`_updateNpcTask` 中校验 NPC 是否在正确场景时，`_door` 类型目标（如 `workshop_door`）在 `SCHEDULE_LOCATIONS` 中 scene 为 `village`，但之前的代码要求 NPC 在室内场景（`doorToScene[tLoc]`），导致站在门口或已进入室内的 NPC 都无法产出。
+**修复**：`_door` 类型任务允许 NPC 在 `village`（门口）或对应室内场景都算到达。
+**改动**：`src/systems/task-system.js`
+
+#### 3. 精神危急 NPC 不返回室内
+**问题**：苏岩等 NPC 精神状态很差（San<40）仍在户外工作直到崩溃。
+**修复**：新增 P0-7 精神危急检测，San<40 + 在户外 → 强制返回宿舍休息。配套新增日程精神状态调整（`_getSanityAdjustedEntry`）。
+**改动**：`src/npc/npc-schedule.js`
+
+#### 4. 苏岩找自己做心理咨询
+**问题**：苏岩（医生）精神状态差时触发 `_triggerStateOverride('mental')`，然后去医疗站找"苏医生"给自己看病。
+**修复**：`su_doctor` 不触发 mental stateOverride；心理咨询需要苏医生在场才开始；苏岩自己的治疗文本改为"自己调整"。
+**改动**：`src/npc/npc-attributes.js`
+
+#### 5. P0 health_critical 与 stateOverride=sick 冲突导致进门出门死循环
+**问题**：NPC 生病中 `stateOverride=sick` 前往医疗站，途中健康低于 P0 阈值触发 `health_critical`→目标改为宿舍→与 sick 覆盖冲突→两个系统交替控制→死循环。
+**修复**：P0-3 检测时跳过已处于 `stateOverride=sick` 的 NPC。同理 `stateOverride=mental` 时跳过 P0-7。
+**改动**：`src/npc/npc-schedule.js`
+
+#### 6. 出门保护期内被重新导航
+**问题**：NPC 刚出门（`_indoorEntryProtection > 0`）时被 stateOverride 卡住检测触发重新导航→进错门→死循环。
+**修复**：stateOverride 卡住检测和 P2 日程导航在 `_indoorEntryProtection > 0` 时跳过。
+**改动**：`src/npc/npc-attributes.js`、`src/npc/npc-schedule.js`
+
+#### 7. 睡眠 San 恢复量不足导致"死亡螺旋"
+**问题**：8 小时睡眠仅恢复约 19 San（0.04/dt × 8h ≈ 19），不足以对冲白天户外+死亡事件的 San 扣减，导致全队 San 逐天下滑直至崩溃。
+**修复**：睡眠 San 恢复从 0.04→0.10/dt（8h 约恢复 48 San）；跳夜补算从 3/h→6/h。
+**改动**：`src/npc/npc-attributes.js`、`src/core/game.js`
+
+### ⚙️ 系统调整
+
+#### 任务类型清理
+- **移除** `SET_TRAP`（效果太弱不值得浪费人力）、`REPAIR_RADIO`（性价比太低）、`MAINTAIN_FURNACE`（暖炉自动燃烧消耗木柴，无需人工维护）
+- **新增** `BUILD_GENERATOR`、`BUILD_LUMBER_MILL`
+- **NPC 专长更新**：赵铁柱/陆辰/王策增加机器建造专长；清璇从陷阱/无线电改为药剂/急救
+
+#### 资源消耗人口缩减
+- **新增** `getPopulationRatio()`：`max(0.3, alive/total)`，人少了木柴/电力消耗按比例降低（最低 30%）
+- 影响：木柴消耗、电力消耗、剩余小时数估算、紧急任务阈值、跳夜补算
+
+#### 暖炉维护效果增强
+- 暖炉维护 NPC 的燃料节约从 10%→30%
+- 新增暖区增强：同场景 NPC 体温恢复+50%、体力恢复+20%
+
+#### NPC 死亡触发紧急会议
+- death-system 检测到 NPC 死亡后延迟 5s 触发 CouncilSystem 紧急决策会议
+- 存活≥2 人时才触发（避免最后一人独自开会）
+
+### 🧠 LLM Prompt 增强
+
+#### 轮回记忆强制体现
+- think prompt 和 action prompt 新增规则：**必须**具体引用前世记忆
+- 示例引导："上一世就是因为柴火不够，第三天暖炉熄了冻死了三个人…"
+- `threat_analysis`/`opportunity_analysis`/`reasoning` 字段示例全部更新为包含前世记忆引用
+- 轮回系统对话规则从"可以引用"改为"**必须**自然地引用前世经验"
+
+#### 投票决策注入
+- action prompt 新增 `3b. 🗳️【投票决策】` 规则：投票结果优先级仅次于生存紧急需求
+- 新增 `${this._councilTask ? ... : ''}` 条件注入投票决策上下文
+
+### 📊 UI/HUD 增强
+
+- **自动化机器面板**：发电机/伐木机建造进度、运行状态、产出速率
+- **医疗气泡增强**：显示具体治疗对象（如"治疗对象: 老钱等3人"）
+- **安抚气泡增强**：显示安抚对象（如"安抚对象: 歆玥"）
+- **NPC 行动日志**：AI 行动决策输出到右侧事件列表（emoji 标记）
+- **资源 prompt 增强**：`getResourceStatusForPrompt()` 新增自动化机器状态信息
+
+### 📝 代码改动总览
+
+| 文件 | 改动内容 |
+|------|---------|
+| `src/systems/council-system.js` | 🆕 投票决策系统（1151行） |
+| `src/systems/council-prompt-builder.js` | 🆕 投票 Prompt 构建器（680行） |
+| `src/systems/machine-system.js` | 🆕 自动化机器系统（473行） |
+| `src/systems/task-system.js` | 移除 SET_TRAP/REPAIR_RADIO/MAINTAIN_FURNACE；新增 BUILD_GENERATOR/BUILD_LUMBER_MILL；新增 `_activateDailyTaskNavigation()`；`_door` 类型位置校验修复 |
+| `src/systems/death-system.js` | NPC 死亡触发紧急 council 会议 |
+| `src/systems/resource-system.js` | 人口缩减系数；暖炉维护增强；机器状态注入 prompt |
+| `src/systems/reincarnation-system.js` | 移除 REPAIR_RADIO/MAINTAIN_FURNACE 引用；轮回记忆对话规则增强 |
+| `src/systems/weather-system.js` | 修复 tempOffset 双重扣减 |
+| `src/core/game.js` | 初始化 MachineSystem/CouncilSystem；移除无线电系统；碰撞系统室内/室外差异化；跳夜机器补算；资源危机自动触发投票 |
+| `src/npc/npc-schedule.js` | `canSafelyGoOutdoor()` 统一门控；`_getScheduleControl()` 统一仲裁；`_getSanityAdjustedEntry()` 精神调整；`activateTaskOverride()` 第5参数 stateDesc；P0-7 精神危急；P0 恢复后统一冷却 |
+| `src/npc/npc-ai.js` | `_getTaskOverrideDesc()` 统一优先级链；`_actionDecision()` taskOverride guard；`_fallbackToRoleDefaultAction()` 补全 actionOverride；action prompt 轮回记忆+投票决策注入 |
+| `src/npc/npc-attributes.js` | 苏岩不自己找自己咨询；心理咨询需苏医生在场；出门保护期检查；睡眠 San 恢复增强 |
+| `src/npc/npc-renderer.js` | think prompt 轮回记忆强制体现；清璇角色描述更新；投票决策上下文注入 |
+| `src/npc/action-effects.js` | `_councilStateDesc` 三路匹配；`addResource()` 统计修复；`build_machine` 效果类型；暖炉维护增强；医疗/安抚气泡显示治疗对象 |
+| `src/npc/npc.js` | 位置修复冷却；碰撞参数调整 |
+| `src/npc/specialty.js` | 新增 BUILD_GENERATOR/BUILD_LUMBER_MILL 专长映射 |
+| `src/ai/llm-client.js` | `callLLMDirect()` 绕过队列 |
+| `src/ui/hud.js` | 自动化机器面板 |
+| `data/action-effects.js` | 电力关键词补充；新增建造发电机/伐木机映射 |
+| `data/npc-configs.js` | 清璇角色描述更新；NPC 配置调整 |
+| `index.html` | 引入 council-system.js / council-prompt-builder.js / machine-system.js |
+| `style.css` | 投票决策弹窗样式；机器面板样式 |
+
+---
+
+## v4.10 — 多系统Bug修复：电力/碰撞/LLM队列/废墟循环 (2026-03-07)
+
+### 🐛 Bug 修复
+
+#### 1. 电力维护无效 — ACTION_EFFECT_MAP 关键词不匹配
+
+**问题**：多个NPC在工坊显示"🔧 正在维护电力"，但电力一点没增加。
+**根因**：任务系统设置NPC的 `stateDesc = "🔧 正在维护电力"`，但 `ACTION_EFFECT_MAP` 中产出电力的关键词是 `['维修发电机', '检查发电机', '技术工作', '制造工具']`——`"维护电力"` 完全匹配不到任何关键词，行动效果系统每帧空转。
+**修复**：在 `ACTION_EFFECT_MAP` 电力产出条目中补充 `'维护电力'` 和 `'正在维护电力'` 关键词。
+**改动**：`data/action-effects.js`
+
+#### 2. 温度双重扣减 — getEffectiveTemp 重复减 tempOffset
+
+**问题**：高难度下电力消耗异常高，4人维护电力仍涨不上去。
+**根因**：`onDayChange()` 中 `currentTemp -= tempOffset`（第1次扣减），`getEffectiveTemp()` 中 `temp -= tempOffset`（第2次扣减），导致实际温度比设计值低了 `tempOffset` 度。hard难度(tempOffset=10) Day2 实际温度从-35°C变成**-50°C**，电力消耗乘数翻倍。
+**修复**：移除 `getEffectiveTemp()` 中的重复 tempOffset 扣减。
+**改动**：`src/systems/weather-system.js: getEffectiveTemp()`
+
+#### 3. 行动效果产出绕过 addResource — 产出不被统计
+
+**问题**：NPC通过行动效果系统产出的资源不被记录到 `dailyCollected`，不触发电力恢复检测。
+**根因**：`action-effects.js` 中 `produce_resource` 效果直接写 `rs[type] += produced`，绕过了 `addResource()` 方法。
+**修复**：改为调用 `rs.addResource()` 方法。
+**改动**：`src/npc/action-effects.js`
+
+#### 4. 室内NPC碰撞抖动/闪现 — 碰撞推挤在狭小空间死循环
+
+**问题**：多个NPC在工坊(12×8格)里疯狂闪现抖动，日志刷屏"被推进墙壁，自动修复位置"。
+**根因**：室内使用与室外相同的碰撞参数（推力2.0、碰撞半径0.45×TILE），多NPC在狭小空间被反复推进家具/墙壁→修复位置→又被推→无限循环。随机推力(nudge)和强制传送脱困(forceUnstuck)加剧了闪现。
+**修复**：
+- 室内场景**完全跳过碰撞推挤**，只做气泡偏移计算（`_computeBubbleOffsets`）
+- 室内NPC通过座位系统(`_pickIndoorSeat`)精确定位，不需要碰撞推力
+- 位置修复逻辑加5秒冷却(`_posFixCooldown`)避免每帧触发
+**改动**：`src/core/game.js: _resolveNPCCollisions()`、`src/npc/npc.js`
+
+#### 5. 讨论系统LLM队列堵塞 — 暂停后讨论等几分钟才发言
+
+**问题**：打开讨论弹窗后NPC一直"正在发言..."但不说话，等了几分钟才出第一句。
+**根因**：所有LLM调用共用一个串行队列(`_llmQueuePromise`)，暂停前NPC的AI决策请求(think-action)已经进入队列。讨论系统的请求排在队尾，要等前面5-6个AI请求各10-30秒处理完才轮到。
+**修复**：
+- 新增 `callLLMDirect()` 函数——绕过串行队列直接调用LLM
+- 讨论系统改用 `GST.callLLMDirect` 替代 `GST.callLLM`
+**改动**：`src/ai/llm-client.js`（新增callLLMDirect）、`src/systems/council-system.js`
+
+#### 6. NPC废墟↔矿渣堆无限来回跑 — fallback行动覆盖缺失
+
+**问题**：歆玥在废墟(43,5)和矿渣堆(43,35)之间反复来回跑，无法停下来。
+**根因**：废墟探索3次用完后 `_fallbackToRoleDefaultAction` 设置了 `_actionTarget = ore_pile`，但**漏了设置 `_actionOverride = true`**。日程系统的一致性检查检测到 `_actionOverride=false` 但 `_actionTarget` 存在→清除 `_actionTarget`→日程重新导航到废墟→到达后又exhausted→又fallback→死循环。同时 `explore_ruins` 效果在exhausted后每帧都会触发fallback，加剧了循环。
+**修复**：
+- `_fallbackToRoleDefaultAction` 补全 `_actionOverride = true` 和 `_currentAction` 设置
+- `explore_ruins` 效果新增 `_ruinsExhaustedDay` 当天标记和 `_ruinsFallbackDone` 单次触发保护
+**改动**：`src/npc/npc-ai.js: _fallbackToRoleDefaultAction()`、`src/npc/action-effects.js: explore_ruins`
+
+### 📝 日志增强
+
+- NPC AI行动决策现在输出到右侧事件列表（emoji标记：🚶/😴/🍽️/⚒️/👫/📍/🔄）
+- 被推进墙壁的位置修复事件输出到右侧事件列表
+- 位置偏移修正事件输出到右侧事件列表
+**改动**：`src/npc/npc-ai.js`、`src/npc/npc.js`、`src/npc/npc-schedule.js`
+
+### 📝 代码改动总览
+
+| 文件 | 改动内容 |
+|------|---------|
+| `data/action-effects.js` | 电力关键词补充 `维护电力`/`正在维护电力` |
+| `src/systems/weather-system.js` | 修复 `getEffectiveTemp()` 双重 tempOffset 扣减 |
+| `src/npc/action-effects.js` | `produce_resource` 改用 `addResource()`；`explore_ruins` 加exhausted标记 |
+| `src/core/game.js` | 室内场景跳过碰撞推挤；气泡偏移用场景化碰撞半径 |
+| `src/npc/npc.js` | 位置修复加5秒冷却 |
+| `src/npc/npc-ai.js` | `_fallbackToRoleDefaultAction` 补全行动覆盖；AI行动日志输出到事件列表 |
+| `src/npc/npc-schedule.js` | 位置偏移修正日志输出到事件列表 |
+| `src/ai/llm-client.js` | 新增 `callLLMDirect()` 绕过队列 |
+| `src/systems/council-system.js` | 讨论系统改用 `callLLMDirect` |
+
+---
+
+## v4.9 — Prompt架构重构：Few-shot + 角色隔离 (2026-03-06)
+
+### 🏗️ 核心改进：参考业界Agent对话最佳实践彻底重构prompt结构
+
+**问题诊断**：
+- 赵铁柱（设定话极少）说了一大段指挥式发言
+- 苏岩把赵铁柱的话错误归因给老钱（"老钱刚才那句'先补饭'"）
+- 所有人说话风格趋同，像在发演讲稿
+
+**根因分析**：
+1. System Prompt 信息过载——角色卡、规则、状态全塞一起，LLM忽略关键约束
+2. 聊天记录用 `XX说：` 平铺——LLM难以分清"谁是谁"，张冠李戴
+3. 缺少 few-shot 示例——光描述"你话少"没用，必须给具体示例
+4. 所有角色用相同 maxTokens=300——导致话少的角色被"撑大"
+
+**解决方案**：
+
+| 改进项 | 旧设计 | 新设计 |
+|--------|--------|--------|
+| System Prompt | 身份+性格+状态+关系+规则(超长) | 精简为身份锁定+角色卡+few-shot示例 |
+| 角色卡 | 5段描述文字(archetype/voice/focus/quirks) | bio+style+字数要求+2-3个说话示例 |
+| 情境信息 | 塞在System Prompt | 移到User Prompt（属于"当前情境"不是"你是谁"） |
+| 聊天记录 | `XX说：YYY` 平铺 | `[XX]: YYY` 角色标签格式 |
+| maxTokens | 所有人300 | 按角色差异化(赵铁柱80/老钱200) |
+| User结尾 | `${name}说：` | `${name}：` + 规则放最后(注意力最强位置) |
+
+**角色maxTokens配置**：
+- 赵铁柱: 80（话极少）
+- 陆辰/清璇: 120（短句）
+- 歆玥: 160（中等）
+- 苏岩/王策: 180（需要分析）
+- 老钱/李婶: 200（需要统筹/唠叨）
+
+**few-shot示例效果**——比任何文字描述都有效：
+- 赵铁柱示例: "柴不够了。" / "我去砍。" / "少废话，干活。"
+- 清璇示例: "爷爷……你手好凉，往火边靠靠。" / "那个……我查过资料"
+- 老钱示例: "大伙儿别慌……当年矿难那会儿，比这还险"
+
+### 🔧 技术改动
+- `council-system.js` — `_buildCharacterCard()` 彻底重写为 few-shot 角色卡
+- `council-system.js` — System Prompt 精简化，情境移入 User Prompt
+- `council-system.js` — 聊天记录格式改为 `[XX]:` 标签格式
+- `council-system.js` — maxTokens 按角色动态配置
+- `council-system.js` — 增加角色名前缀清除（防止LLM重复名字）
+- `council-system.js` — User Prompt 末尾用 `${name}：` 引导续写
+
+---
+
+## v4.8 — 角色性格深度重构：动漫原型锚定 (2026-03-06)
+
+### 🎭 核心改进：每个角色对标3个经典动漫/游戏角色
+
+通过动漫/游戏角色的性格原型（archetype）来锚定每个NPC的说话风格和行为模式，让LLM生成更有辨识度的对白：
+
+| 角色 | 对标1 | 对标2 | 对标3 |
+|---|---|---|---|
+| 老钱 | 火影·三代目猿飞日斩 | 钢炼·霍恩海姆 | 进击的巨人·艾尔文团长 |
+| 李婶 | 银魂·阿妙 | 鬼灭·香奈惠 | 咒术回战·野蔷薇 |
+| 赵铁柱 | 进击的巨人·利威尔 | 鬼灭·义勇 | FF7·巴雷特 |
+| 苏岩 | 火影·卡卡西 | 咒术·家入硝子 | 辐射4·柯丁顿 |
+| 王策 | 死亡笔记·L | 心理测量者·槙岛圣护 | 三体·罗辑 |
+| 陆辰 | 咒术·虎杖悠仁 | 进击的巨人·让 | 鬼灭·伊之助 |
+| 歆玥 | 钢炼·温莉 | 86·蕾娜 | 鬼灭·蜜璃 |
+| 清璇 | 钢炼·阿尔冯斯 | 约定梦幻岛·艾玛 | 86·安洁 |
+
+### 📝 改动范围
+
+- `data/npc-configs.js`: 重写全部8个NPC的`personality`字段（从2-3句书面语→多段落口语化性格描写，包含动漫原型、说话习惯、暗恋表现、压力反应等）
+- `src/systems/council-system.js`: 重写`SPEECH_STYLES`（新增`archetype`字段），角色卡增加【性格原型】维度
+- 同步升级讨论系统的好感度/记忆/暴风雪/轮回/反重复注入（v4.7.5的改进保留）
+
+---
+
+## v4.7 — 营地讨论系统（暂停时NPC围坐聊天） (2026-03-06)
+
+### 🔥 新功能：营地讨论（Council）
+
+- **触发方式**：点击暂停按钮 `⏸️` 时自动弹出"营地讨论"弹窗
+- **功能描述**：3-5个活着的NPC围坐在暖炉旁，轮流就当前局势发言
+- **讨论内容**：分析物资状况、规划分工、抱怨困难、互相鼓励、商讨对策等
+- **AI驱动**：每个NPC的发言由LLM根据当前环境+角色性格+生存数据实时生成
+- **环境感知**：弹窗顶部显示当前天数/温度/天气/资源/存亡摘要
+- **角色差异化**：
+  - 老钱：统筹全局、安抚民心
+  - 苏岩：关注健康、医疗建议
+  - 赵铁柱：务实分析物资、分配方案
+  - 陆辰：行动派、具体方案
+  - 王策：哲学思考、不同视角
+  - 歆玥：关注情绪、表达希望
+  - 清璇：药物/急救角度建议
+  - 李婶：照顾细节、暖心唠叨
+- **San值影响**：低San值NPC发言会变得暴躁、悲观、抱怨
+- **悲痛影响**：正在悲痛的NPC会提到逝者
+- **继续讨论**：讨论结束后可点击"继续讨论"追加2-3人发言
+- **关闭即继续**：关闭弹窗自动取消暂停，继续游戏
+
+### 📁 新增/修改文件
+
+- **新增** `src/systems/council-system.js` — 营地讨论系统核心逻辑（选择发言者、LLM调用、UI渲染）
+- `index.html` — 添加 `#council-overlay` 弹窗DOM + 引入脚本
+- `style.css` — 暖色调讨论弹窗样式（橙色主题，暖炉氛围）
+- `src/core/game.js` — `togglePause()` 暂停时调用 `councilSystem.open()`、初始化 `CouncilSystem`
+
+---
+
+## v4.6 — 移除无意义任务 + 场景限制修复 (2026-03-06)
+
+### 🗑️ 移除：MAINTAIN_FURNACE 维护暖炉任务
+
+- **原因**：暖炉自动燃烧消耗木柴，不需要专人"维护"，占用人力毫无实际意义
+- **替代**：原来分配到MAINTAIN_FURNACE的NPC（赵铁柱Day2/4、李婶Day2、陆辰Day4）改为PREPARE_WARMTH（准备御寒物资）
+- **影响文件**：task-system.js, reincarnation-system.js, game.js
+
+### 🗑️ 移除：SET_TRAP 布置陷阱任务
+
+- **原因**：全员San+5效果太弱，不值得浪费清璇的人力。末日生存应集中力量在医疗和物资上
+- **替代**：清璇的Day1陷阱任务改为纯医疗
+- **影响文件**：task-system.js, game.js
+
+### 🔧 修复：BUILD_FURNACE 目标位置
+
+- **问题**：修建第二暖炉的目标位置是`dorm_b_door`（宿舍B门口），不合理
+- **修复**：改为`workshop_door`（工坊门口），工具齐全更合理
+
+### 🔧 修复：ACTION_EFFECT_MAP 场景限制
+
+- **巡查(medical_heal)**：从"不限场景"改为`requiredScene: 'medical'`，医疗效果只在医疗站生效
+- **维护暖炉(furnace_maintain)**：从"不限场景"改为`requiredScene: 'village'`（暖炉在广场，不能隔空维护）
+
+### 🔧 修复：清璇日程 + 角色描述
+
+- **日程修改**：15-17时和19-22时从"在工坊修理无线电台"改为"在医疗站制作草药制剂和急救包"
+- **专长修改**：移除`radio_repair`，替换为`craft_medkit: 1.3`
+- **AI描述**：从"药剂师学徒/陷阱工…修理无线电"改为"药剂师学徒…急救包"
+
+### 🔧 修复：苏岩日程描述
+
+- **17-18时**：从"巡查大家的健康状况"改为"安抚大家、查看健康状况"（匹配morale_boost而非medical_heal）
+- **19-21时**：从"巡查大家的健康、安抚民心"改为"安抚大家、心理支持"
+
+### 📝 代码改动清单
+
+- `data/action-effects.js`: 巡查限定medical场景，维护暖炉限定village场景
+- `data/npc-configs.js`: 清璇日程修理无线电→制药，苏岩巡查→安抚，清璇radio_repair→craft_medkit
+- `src/systems/task-system.js`: 移除MAINTAIN_FURNACE/SET_TRAP枚举+配置+专长+Day1~4任务+效果case，BUILD_FURNACE目标→workshop_door
+- `src/systems/reincarnation-system.js`: MAINTAIN_FURNACE→PREPARE_WARMTH，taskShort映射更新
+- `src/core/game.js`: taskShort映射移除MAINTAIN_FURNACE/SET_TRAP
+- `src/npc/specialty.js`: 移除radio_repair描述
+- `src/npc/npc-renderer.js`: 清璇AI prompt移除修理无线电描述
+
+## v4.5 — 移除无线电系统 + 进出门诊断日志 (2026-03-06)
+
+### 🗑️ 移除：REPAIR_RADIO 无线电修理系统
+
+- **原因**：修无线电任务性价比极低（清璇花4h修理，实际效果仅第4天全员San+10），在前两天生死攸关时浪费宝贵人力
+- **移除范围**：
+  - `task-system.js`: 移除 `TASK_TYPES.REPAIR_RADIO` 定义、任务配置、专长权重、两处任务生成逻辑（Day2/Day3）、执行case
+  - `game.js`: 移除 `_radioRepairProgress`/`_radioRepaired`/`_radioRescueTriggered` 初始化、第4天求救触发逻辑、序列化/反序列化、HUD映射
+  - `action-effects.js`: 移除 `repair_radio` 执行case和气泡显示case
+  - `npc-attributes.js`: 移除 `radioRepaired` 目标追踪（返回0兼容旧存档）
+  - `reincarnation-system.js`: 移除Day3清璇任务分配（改为PREPARE_MEDICAL）、两处taskShort映射
+  - `specialty.js`: 移除 `repair_radio` 专长倍率case
+  - `npc-ai.js`: 移除 `productiveTypes` 中的 `repair_radio`
+  - `data/action-effects.js`: 移除无线电效果配置
+  - `data/npc-configs.js`: 移除清璇的repair_radio目标
+
+### 🔍 新增：NPC进出门诊断日志系统
+
+- **问题**：NPC在kitchen/village间反复WALKING（进门→出门→进门循环），无法确定根因
+- **方案**：在所有关键场景切换点添加 `aiModeLogger.log('DOOR', ...)` 详细日志
+- **日志覆盖点**：
+  - `_enterIndoor()`: 每次进门记录目标场景、当前场景、原因（饥饿覆盖/任务/日程导航）、调用栈
+  - `_walkToDoorAndExit()`: 每次出门记录当前场景、原因、调用栈
+  - 安全网进门: 当scheduleReached=true但NPC仍在village时触发的自动进门
+  - P2日程恢复导航: 吃完饭/休息完后日程重新接管时的跨场景导航
+  - `_triggerHungerBehavior()`: 饥饿覆盖导航目标
+  - `_onEatingComplete()`: 吃饭完成后日程恢复
+- **日志格式**：`DOOR | NPC名 进门/出门←→场景 | 原因=xxx | HP/STA/HUN/SAN快照 | caller=调用栈`
+
+### 📝 代码改动
+
+- `src/systems/task-system.js`: 移除REPAIR_RADIO定义+配置+生成+执行（6处）
+- `src/core/game.js`: 移除radio初始化+求救逻辑+序列化+HUD映射（5处）
+- `src/npc/action-effects.js`: 移除repair_radio执行+气泡（2处）
+- `src/npc/npc-attributes.js`: radioRepaired返回0 + 饥饿导航日志 + 吃饭完成日志
+- `src/npc/npc.js`: _enterIndoor + _walkToDoorAndExit 添加DOOR日志
+- `src/npc/npc-schedule.js`: 安全网进门 + P2日程恢复 + 跨场景导航 添加DOOR日志
+- `src/npc/specialty.js`: 移除repair_radio case
+- `src/npc/npc-ai.js`: 移除productiveTypes中的repair_radio
+- `src/systems/reincarnation-system.js`: 移除任务分配+映射
+- `data/action-effects.js`: 移除无线电效果配置
+- `data/npc-configs.js`: 移除清璇repair_radio目标
+
+---
+
+## v4.4.3 — 户外天气防护 + 气泡信息增强 (2026-03-06)
+
+### 🐛 修复：OUTDOOR_TARGETS 缺失导致极寒天气NPC照常去户外采集
+
+- **现象**：Day 2（-30°C大雪），NPC仍然被派去冰湖/伐木场采集，导致大面积失温→体力耗尽→饥饿→连锁死亡
+- **根因**：`NPC.OUTDOOR_TARGETS` 只包含了 `furnace_plaza`, `lumber_yard`, `ruins`, `north_gate`, `south_gate`
+  - 遗漏了4个真正的户外资源采集区：`frozen_lake`（冰湖）、`lumber_camp`（伐木场）、`ruins_site`（废墟）、`ore_pile`（矿渣堆）
+  - `_getWeatherAdjustedEntry()` 检查目标是否在 `OUTDOOR_TARGETS` 中来决定是否替换为室内日程
+  - 遗漏 → 极端天气下NPC照常去户外 → 快速失温死亡
+
+### ✨ 优化：医疗/安抚气泡显示具体作用对象
+
+- **之前**：苏岩气泡只显示 `医疗救治中（HP+36/h）`，无法知道在治疗谁
+- **现在**：显示 `医疗救治中（HP+36/h）→ 治疗对象: 王策等3人`
+- 安抚同理：`安抚鼓舞中（San+21.6/h）→ 安抚对象: 赵铁柱等5人`
+- 无需治疗/安抚时显示"待命"状态
+
+### 📝 代码改动
+
+- `src/npc/npc.js`：`OUTDOOR_TARGETS` 新增 `frozen_lake`, `lumber_camp`, `ruins_site`, `ore_pile`
+- `src/npc/action-effects.js`：`medical_heal` 和 `morale_boost` 气泡文本增加作用对象名字
+
+---
+
+## v4.4.2 — 第二暖炉永远无法建成 Bug 修复 (2026-03-06)
+
+### 🐛 修复：第二暖炉建造任务因位置校验错误永远不执行
+
+- **现象**：第4世、资源充足（木柴86、食物78），但暖炉始终只有1座，第3天分配了BUILD_FURNACE任务，NPC站在dorm_b门口却永远不开工
+- **根因**：`task-system.js` 的任务位置校验存在逻辑错误
+
+**详细分析**：
+
+1. BUILD_FURNACE任务的 `targetLocation = 'dorm_b_door'`
+2. `dorm_b_door` 在 `SCHEDULE_LOCATIONS` 中定义为 `{ scene: 'village', x: 33, y: 24 }`（**村庄场景的门口坐标**）
+3. NPC导航到 `dorm_b_door` 后实际站在 **village场景**
+4. 但任务执行时的位置校验逻辑是：`_door → 映射为室内场景 → requiredScene = 'dorm_b'`
+5. 校验 `npc.currentScene('village') !== requiredScene('dorm_b')` → **不匹配** → `return` 不执行效果
+
+```
+死循环：NPC站在dorm_b门口(village) → 校验要求在dorm_b(室内) → 永远不匹配 → 永远不开工
+```
+
+**修复**：`_door` 类型任务的位置校验同时接受 `village`（门口）和对应室内场景（如 `dorm_b`）
+
+### 📝 代码改动
+
+- `src/systems/task-system.js`（第997-1013行）：
+  - 旧逻辑：`_door` 目标 → 仅接受室内场景
+  - 新逻辑：`_door` 目标 → 接受 `village`（门口）或对应室内场景
+
+### 影响范围
+
+此bug不仅影响BUILD_FURNACE，还影响所有 `targetLocation` 为 `_door` 类型的任务：
+- `MAINTAIN_POWER`（workshop_door）
+- `DISTRIBUTE_FOOD`（kitchen_door）
+- `PREPARE_MEDICAL`（medical_door）
+- `REPAIR_RADIO`（workshop_door）
+
+这些任务之前**NPC站在门口也不会执行**，修复后全部恢复正常。
+
+---
+
+## v4.4.1 — 轮回记忆强制体现修复 (2026-03-06)
+
+### 🐛 修复：NPC在轮回模式下不引用前世记忆
+
+- **问题**：轮回系统已将前世记忆（死亡记录、资源状况、教训等）注入到NPC的think/行动决策/对话prompt中，但NPC的想法和对话中完全没有体现前世经验，表现得和第1世一样
+- **根因**：prompt中虽然有前世记忆数据，但**重要规则/决策规则中没有强制要求NPC引用前世记忆**，LLM自然忽略了这些信息
+- **解决方案**：在3个核心prompt的规则中新增**强制引用前世记忆**规则
+
+### 📝 代码改动
+
+- `src/npc/npc-renderer.js`（think/想法prompt）：
+  - 重要规则新增第8条：🔮【轮回记忆·必须体现】要求thought中**必须**明确引用前世记忆事件，如"记得上一世XXX在第二天冻死了"
+  - thought字段描述增强：明确要求"如果有前世记忆，必须引用具体的前世事件"
+  
+- `src/npc/npc-ai.js`（行动决策prompt）：
+  - 决策规则新增第15条：🔮【轮回记忆·必须体现】要求threat_analysis和reasoning中必须引用前世记忆
+  - threat_analysis字段示例增强：引导NPC说出"上一世就是因为柴火不够，第三天暖炉熄了冻死了三个人"
+  - opportunity_analysis字段示例增强：引导NPC引用前世成功经验
+  - reasoning字段示例增强：引导NPC体现轮回意识
+
+- `src/dialogue/dialogue-manager.js`（NPC对话prompt）：
+  - 重要规则新增第7条：🔮【轮回记忆】要求对话中自然引用前世经历
+
+- `src/systems/reincarnation-system.js`（前世记忆生成）：
+  - `getPastLifeHintForDialogue()` 对话指令增强："可以直接引用" → "**必须**自然地引用前世经验"
+
+### 预期效果
+
+轮回模式下NPC的想法、行动决策、对话中会出现：
+- 想法：*"记得上一世老钱第二天就冻死了，这次绝不能重蹈覆辙，必须优先建第二暖炉"*
+- 决策：*"上一世就是因为柴火不够，第三天暖炉熄了冻死了三个人…这次绝不能重蹈覆辙"*
+- 对话：*"上次咱们就是栽在这上面了，这回可得提前备足柴火！"*
+
+---
+
 ## v4.4 — 断点续玩功能 (2026-03-06)
 
 ### ✨ 新功能：刷新/关闭页面后可从上次进度继续
@@ -1394,6 +2169,23 @@ AI轮询加速3倍、丰富晚间社交活动、睡眠安全机制。
 - [x] IndoorMap底图渲染：indoorMapKey属性 + drawGrid()重写（SpriteLoader底图优先 + fallback逐格着色）
 - [x] 7个室内子类改造：家具色块条件绘制（底图模式跳过）+ 动态效果始终绘制（火焰/指示灯等）
 - [x] sprite-manifest注册室内底图：6个 `*_indoor` 条目，SpriteLoader自动加载
+- [x] 投票决策系统(CouncilSystem)：LLM驱动多轮讨论+投票表决+activateTaskOverride分配
+- [x] 自动化机器系统(MachineSystem)：发电机+伐木机建造/运行/产出
+- [x] 统一行为仲裁(_getScheduleControl)：P0>stateOverride>taskOverride>actionOverride>P2日程
+- [x] 统一taskOverride stateDesc管道：activateTaskOverride第5参数+_getTaskOverrideDesc优先级链
+- [x] 户外安全门控(canSafelyGoOutdoor)：属性+天气+冷却统一判断
+- [x] 精神危急P0-7：San<40+户外→强制返回室内
+- [x] 苏岩不自己找自己咨询：id检查+在场检查+文本区分
+- [x] P0/stateOverride冲突修复：sick时跳过P0-3、mental时跳过P0-7
+- [x] 出门保护期防重导航：_indoorEntryProtection>0时跳过卡住检测
+- [x] 任务只建映射不导航修复：_activateDailyTaskNavigation桥接
+- [x] _door类型位置校验修复：village和室内都算到达
+- [x] 睡眠San恢复增强：0.04→0.10/dt
+- [x] 资源消耗人口缩减：getPopulationRatio()
+- [x] 暖炉维护增强：10%→30%燃料节约+暖区体温/体力加速
+- [x] NPC死亡触发紧急council会议
+- [x] 轮回记忆Prompt强制体现
+- [x] 移除SET_TRAP/REPAIR_RADIO/MAINTAIN_FURNACE，新增BUILD_GENERATOR/BUILD_LUMBER_MILL
 - [ ] 🟡 San值崩溃速度调优：第2天清晨3小时内5人精神崩溃致死，户外寒冷+死亡惩罚+San<30恶性循环三者叠加形成不可逆的"死亡螺旋"
 - [ ] 🟡 食物消耗异常排查：第1天实际消耗64单位 vs 设计预期24单位（2.6倍差异），需逐环排查消耗触发点
 - [ ] 🟡 资源消耗日志增强：每次资源消耗记录触发原因和具体数量（目前只有每小时总量，无法定位异常消耗来源）

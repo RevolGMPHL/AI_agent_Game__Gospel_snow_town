@@ -236,6 +236,20 @@
                 <span class="res-bar-val" id="res-medkit-val">0</span>
             </div>
             <div class="res-bar-divider"></div>
+            <!-- 发电机状态 -->
+            <div class="res-bar-item res-bar-item-machine" id="machine-generator-bar" style="display:none;">
+                <span class="res-bar-icon">⚡</span>
+                <span class="res-bar-label">发电机</span>
+                <span class="res-bar-gauge machine-gauge"><div class="res-bar-fill machine-fill" id="machine-generator-fill" style="width:0%"></div></span>
+                <span class="res-bar-val" id="machine-generator-val">—</span>
+            </div>
+            <!-- 伐木机状态 -->
+            <div class="res-bar-item res-bar-item-machine" id="machine-lumber-bar" style="display:none;">
+                <span class="res-bar-icon">🪵</span>
+                <span class="res-bar-label">伐木机</span>
+                <span class="res-bar-gauge machine-gauge"><div class="res-bar-fill machine-fill" id="machine-lumber-fill" style="width:0%"></div></span>
+                <span class="res-bar-val" id="machine-lumber-val">—</span>
+            </div>
             <div class="res-bar-item">
                 <span class="res-bar-icon">📋</span>
                 <span class="res-bar-label">任务</span>
@@ -269,6 +283,18 @@
                 <button id="btn-save-debug-log" class="chat-log-clear-btn" title="保存Debug日志到服务器">💾</button>
                 <button id="btn-clear-chat-log" class="chat-log-clear-btn" title="清空记录">🗑️</button>
             </div>
+            <!-- 【v4.17】行动方案面板（嵌入决策动态面板顶部） -->
+            <div id="work-plan-panel">
+                <div class="wpp-header">
+                    <span class="wpp-title">📋 行动方案</span>
+                    <span class="wpp-time" id="wpp-time"></span>
+                    <button class="wpp-toggle" id="wpp-toggle" title="折叠/展开">▼</button>
+                </div>
+                <div class="wpp-body" id="wpp-body">
+                    <div class="wpp-empty">等待分工...</div>
+                </div>
+            </div>
+            <div id="council-decision-panel" class="cdp-panel hidden"></div>
             <div id="chat-log-content"></div>
         </div>
 
@@ -306,7 +332,7 @@
             </div>
             <div class="npc-detail-tabs">
                 <button class="npc-tab active" data-tab="attributes">📊 属性</button>
-                <button class="npc-tab" data-tab="schedule">📋 日程</button>
+                <button class="npc-tab" data-tab="schedule">🤖 行动</button>
                 <button class="npc-tab" data-tab="memory">💬 记录</button>
                 <button class="npc-tab" data-tab="relations">❤️ 关系</button>
                 <button class="npc-tab" data-tab="debug" id="npc-tab-debug" style="display:none;">🔍 Debug</button>
@@ -317,6 +343,26 @@
                 <div class="npc-tab-content" id="tab-memory"></div>
                 <div class="npc-tab-content" id="tab-relations"></div>
                 <div class="npc-tab-content" id="tab-debug"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 营地讨论弹窗（暂停时触发） -->
+    <div id="council-overlay" style="display:none;">
+        <div id="council-panel">
+            <div class="council-header">
+                <span class="council-title">🔥 营地讨论</span>
+                <span class="council-title-time" id="council-title-time"></span>
+                <button class="council-close" id="council-close">✕</button>
+            </div>
+            <div class="council-situation" id="council-situation"></div>
+            <div class="council-body" id="council-body">
+                <!-- 由JS动态填充讨论内容 -->
+            </div>
+            <div class="council-footer">
+                <span class="council-status" id="council-status">💭 讨论中...</span>
+                <button class="council-more-btn" id="council-more" style="display:none;">💬 继续讨论</button>
+                <button class="council-vote-btn" id="council-vote" style="display:none;">🗳️ 发起投票</button>
             </div>
         </div>
     </div>
@@ -380,26 +426,29 @@
     <script src="src/map/map-registry.js?v=41"></script>
 
     <!-- ====== Layer 3: NPC 核心 + mixin ====== -->
-    <script src="src/npc/npc.js?v=41"></script>
-    <script src="src/npc/npc-ai.js?v=41"></script>
+    <script src="src/npc/npc.js?v=45"></script>
+    <script src="src/npc/npc-ai.js?v=44"></script>
     <script src="src/npc/npc-attributes.js?v=41"></script>
-    <script src="src/npc/npc-renderer.js?v=41"></script>
+    <script src="src/npc/npc-renderer.js?v=43"></script>
     <script src="src/npc/npc-schedule.js?v=41"></script>
-    <script src="src/npc/action-effects.js?v=41"></script>
+    <script src="src/npc/action-effects.js?v=46"></script>
     <script src="src/npc/specialty.js?v=41"></script>
 
     <!-- ====== Layer 4: 游戏子系统 ====== -->
     <script src="src/systems/difficulty-config.js?v=41"></script>
-    <script src="src/systems/weather-system.js?v=41"></script>
+    <script src="src/systems/weather-system.js?v=42"></script>
     <script src="src/systems/resource-system.js?v=41"></script>
     <script src="src/systems/furnace-system.js?v=41"></script>
+    <script src="src/systems/machine-system.js?v=41"></script>
     <script src="src/systems/death-system.js?v=41"></script>
-    <script src="src/systems/reincarnation-system.js?v=41"></script>
-    <script src="src/systems/task-system.js?v=41"></script>
+    <script src="src/systems/reincarnation-system.js?v=43"></script>
+    <script src="src/systems/task-system.js?v=43"></script>
     <script src="src/systems/event-system.js?v=41"></script>
+    <script src="src/systems/council-prompt-builder.js?v=41"></script>
+    <script src="src/systems/council-system.js?v=41"></script>
 
     <!-- ====== Layer 5: 对话 + AI ====== -->
-    <script src="src/dialogue/dialogue-manager.js?v=41"></script>
+    <script src="src/dialogue/dialogue-manager.js?v=43"></script>
     <script src="src/dialogue/dialogue-ui.js?v=41"></script>
     <script src="src/ai/llm-client.js?v=41"></script>
     <script src="src/ai/llm-status.js?v=41"></script>
@@ -407,7 +456,7 @@
 
     <!-- ====== Layer 6: 核心引擎 + UI + 启动 ====== -->
     <script src="src/core/camera.js?v=41"></script>
-    <script src="src/core/game.js?v=42"></script>
+    <script src="src/core/game.js?v=43"></script>
     <script src="src/core/renderer.js?v=41"></script>
     <script src="src/core/input.js?v=41"></script>
     <script src="src/ui/hud.js?v=41"></script>

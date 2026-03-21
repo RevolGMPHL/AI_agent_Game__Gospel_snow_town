@@ -93,7 +93,7 @@
 
         // 木柴检测：剩余<2小时，且NPC是体力型角色
         if (rs.getWoodFuelHoursRemaining() < 2) {
-            const isPhysical = (role === 'worker' || specs.chopping || specs.hauling || specs.furnace_maintain);
+            const isPhysical = (role === 'worker' || specs.chopping || specs.hauling);
             if (isPhysical) {
                 gatherType = 'wood';
                 gatherTarget = 'lumber_camp';
@@ -275,26 +275,51 @@
         } else if (this._stateOverride === 'sick' || this._stateOverride === 'mental') {
             // 目标：去医疗站 → 到达后开始治疗
             if (this.currentScene === 'medical') {
+                // 【v4.1修复】心理咨询需要苏医生在场才能开始
+                if (this._stateOverride === 'mental') {
+                    const suDoc = game.npcs.find(n => n.id === 'su_doctor');
+                    const suDocHere = suDoc && suDoc.currentScene === 'medical' && !suDoc.isDead && !suDoc.isSleeping;
+                    if (!suDocHere) {
+                        // 苏医生不在 → 取消咨询，等下次再来
+                        this.expression = '苏岩不在医疗站…回头再来吧';
+                        this.expressionTimer = 6;
+                        this.mood = '失望';
+                        this._clearStateOverride();
+                        this.currentScheduleIdx = -1;
+                        this.scheduleReached = false;
+                        if (game.addEvent) {
+                            game.addEvent(`😕 ${this.name} 到了医疗站，但苏岩不在，咨询取消`);
+                        }
+                        return;
+                    }
+                }
                 this._startTreatment(game);
                 return;
             }
         }
 
         // 还在路上：检查是否卡住
-        if (this.isMoving || this.currentPath.length > 0) {
+        if (this.isMoving || this.currentPath.length > 0 || this._walkingToDoor) {
             this._stateOverrideStuckTimer = 0;
             return;
         }
 
+        // 【v4.5修复】出门保护期内不重新导航，防止刚出门就被重新导航→进错门→死循环
+        if (this._indoorEntryProtection > 0) {
+            return;
+        }
+
         // 不在移动也没到目标 → 可能卡住了
-        this._stateOverrideStuckTimer += 1;
-        if (this._stateOverrideStuckTimer > 2) {
+        const speedMult = (game && game.speedOptions) ? game.speedOptions[game.speedIdx] : 1;
+        const realDt = speedMult > 0 ? dt / speedMult : dt;
+        this._stateOverrideStuckTimer += realDt;
+        if (this._stateOverrideStuckTimer > 3) {
             this._stateOverrideStuckTimer = 0;
             this._navigateToScheduleTarget(targetKey, game);
         }
 
-        // 超时兜底：15秒还没到 → 传送
-        this._stateOverrideTravelTimer += dt;
+        // 超时兜底：15秒真实时间还没到 → 传送
+        this._stateOverrideTravelTimer += realDt;
         if (this._stateOverrideTravelTimer > 15) {
             this._stateOverrideTravelTimer = 0;
             const overrideType = this._stateOverride;
@@ -455,7 +480,7 @@
             const sanBefore = this.sanity;
             this.sanity = Math.min(100, this.sanity + 30);
             this.mood = '平静';
-            this.expression = '感觉好多了，谢谢苏医生';
+            this.expression = this.id === 'su_doctor' ? '自己调整了一下，好多了' : '感觉好多了，谢谢苏岩';
             this.stateDesc = '咨询结束，精神好多了';
             this._logDebug('sanity', `💊 心理咨询结束! San: ${Math.round(sanBefore)}→${Math.round(this.sanity)} (+${Math.round(this.sanity - sanBefore)})`);
         } else {
@@ -524,6 +549,11 @@
 
     proto._onEatingComplete = function() {
         this._logDebug('override', `[行为完成] 吃饭完成`);
+        // 【v4.5诊断】记录吃完饭后的日程恢复
+        if (this.game && this.game.aiModeLogger) {
+            const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+            this.game.aiModeLogger.log('EAT_DONE', `${this.name} 吃饭完成 | 场景=${this.currentScene} | 接下来日程恢复 | ${snap}`);
+        }
         // 1. 恢复饱腹值已在调用前处理
         // 2. 清除所有饥饿相关状态
         this.isEating = false;
@@ -613,7 +643,14 @@
 
         const isMental = (this._stateOverride === 'mental');
         this.stateDesc = isMental ? '正在接受心理咨询' : '正在看病治疗';
-        this.expression = isMental ? '跟苏医生聊聊，感觉好多了…' : '苏医生在给我看病…';
+        // 【v4.1修复】根据苏医生是否在场显示不同文本，苏岩自己不说"跟自己聊"
+        if (isMental) {
+            const suDoc = game.npcs.find(n => n.id === 'su_doctor');
+            const suDocHere = suDoc && suDoc.currentScene === this.currentScene && !suDoc.isDead;
+            this.expression = suDocHere ? '跟苏岩聊聊，感觉好多了…' : '在医疗站坐坐，缓一缓…';
+        } else {
+            this.expression = '在医疗站接受治疗中…';
+        }
         this.expressionTimer = 8;
         this.mood = '期待';
 
@@ -682,6 +719,11 @@
         // 导航到目标
         // 【修复】先设 scheduleReached=false，再调用导航（导航内部可能把它改回 true，不能被覆盖）
         this.scheduleReached = false;
+        // 【v4.5诊断】记录饥饿覆盖导航到aiModeLogger
+        if (game && game.aiModeLogger) {
+            const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+            game.aiModeLogger.log('HUNGER', `${this.name} 饥饿导航→${eatTargets.target}(${eatTargets.desc}) | 当前场景=${this.currentScene} | hunger=${Math.round(this.hunger)} | ${snap}`);
+        }
         this._navigateToScheduleTarget(eatTargets.target, game);
     }
 
@@ -769,7 +811,7 @@
             // 睡觉时：体力恢复，San值恢复，健康微恢复（不消耗体力、不会饿醒）
             const sleepSanBefore = this.sanity;
             this.stamina = Math.min(100, this.stamina + 0.06 * dt);  // 体力恢复【已调整：从0.12降为0.06】
-            this.sanity = Math.min(100, this.sanity + 0.04 * dt);    // 睡觉是恢复精神的主要途径【已调整：从0.06降为0.04】
+            this.sanity = Math.min(100, this.sanity + 0.10 * dt);    // 睡觉是恢复精神的主要途径【v4.6增强：0.04→0.10，8h睡眠约恢复48San】
             if (this.health < 80) this.health = Math.min(100, this.health + 0.02 * dt);
             // 【Debug】睡眠San恢复日志
             if (game.mode === 'debug') {
@@ -788,24 +830,9 @@
 
         const hour = game.getHour();
 
-        // ---- 饥饿自然衰减（清醒时持续缓慢下降）----
-        // 基础衰减速率：0.5/游戏小时 = 0.000139/秒
-        let hungerDecayRate = 0.000139;
-        // 【难度系统】饱腹衰减乘以难度倍率
-        const _diffHungerMult = game.getDifficultyMult ? game.getDifficultyMult('hungerDecayMult') : 1.0;
-        hungerDecayRate *= _diffHungerMult;
-        const ws = game.weatherSystem;
-        const currentTemp = ws ? ws.getEffectiveTemp() : 0;
-        // 户外寒冷环境（温度<-20°C）时衰减加速至2倍
-        if (this.currentScene === 'village' && currentTemp < -20) {
-            hungerDecayRate *= 2;
-        }
-        // 工作中衰减加速至1.5倍
-        const isWorkingForHunger = this.workplaceName && this.currentScene === this.workplaceName;
-        if (isWorkingForHunger) {
-            hungerDecayRate *= 1.5;
-        }
-        this.hunger = Math.max(0, this.hunger - hungerDecayRate * dt);
+        // ---- 饥饿自然衰减 ----
+        // 【v4.16修复】饥饿衰减已统一在 _updateHunger() 中处理，此处不再重复扣减
+        // 原来此处有 hungerDecayRate = 0.000139/s 的微量衰减，与 _updateHunger 的主力衰减重复
 
         // ---- 体力消耗（清醒时持续缓慢下降）----
         // 工作中消耗更快（在工作场所时）【体力变化快】
@@ -921,10 +948,19 @@
             sanSources.push(`社交+${(0.12 * dt).toFixed(2)}`);
         }
         // 【增强】San值低时额外加速下降（恶性循环：精神越差越难自控）
+        // 【修复】添加保底机制：物资充足时恶性循环速率减半，San不会因纯粹的心理因素快速致死
         if (this.sanity < 30 && this.sanity > 0) {
-            const spiralRate = 0.03 * sanDropMult * dt;
-            this.sanity = Math.max(0, this.sanity - spiralRate);
-            sanSources.push(`恶性循环-${spiralRate.toFixed(2)}`);
+            // 物资充足判定：食物>30且非饥饿状态，给予减缓
+            const resourceOk = this.hunger > 30 && this.health > 30;
+            const spiralMult = resourceOk ? 0.5 : 1.0; // 物资充足时恶性循环减半
+            const spiralRate = 0.03 * sanDropMult * dt * spiralMult;
+            // 保底：San不会因恶性循环降到5以下（需要其他致命因素才会继续降）
+            if (this.sanity - spiralRate >= 5 || !resourceOk) {
+                this.sanity = Math.max(0, this.sanity - spiralRate);
+            } else {
+                this.sanity = Math.max(5, this.sanity - spiralRate);
+            }
+            sanSources.push(`恶性循环-${spiralRate.toFixed(2)}${resourceOk ? '(减缓)' : ''}`);
         }
         // 【增强】健康低时也拖累San值（身体不好影响心情）
         if (this.health < 35) {
@@ -1009,8 +1045,15 @@
         }
 
         // 清醒时San值自然缓慢下降（需要持续获取情绪价值/休息）
-        this.sanity = Math.max(0, this.sanity - 0.02 * sanDropMult * dt);
-        sanSources.push(`自然-${(0.02 * sanDropMult * dt).toFixed(2)}`);
+        // 【修复】物资充足时保底San=5，避免纯心理因素快速致死
+        const naturalDecay = 0.02 * sanDropMult * dt;
+        const _resourceSufficient = this.hunger > 30 && this.health > 30 && this.stamina > 15;
+        if (_resourceSufficient && this.sanity - naturalDecay < 5) {
+            this.sanity = Math.max(5, this.sanity);
+        } else {
+            this.sanity = Math.max(0, this.sanity - naturalDecay);
+        }
+        sanSources.push(`自然-${naturalDecay.toFixed(2)}`);
 
         // 【Debug】周期性记录San值变化（每60帧约2秒记录一次，避免刷屏）
         if (game.mode === 'debug') {
@@ -1643,7 +1686,7 @@
                     currentValue = game._medkitCount || 0; // 全局急救包总数
                     break;
                 case 'radioRepaired':
-                    currentValue = game._radioRepaired ? 1 : 0;
+                    currentValue = 0; // 无线电系统已移除（v4.5）
                     break;
                 case 'secondFurnaceBuilt':
                     currentValue = (game.furnaceSystem && game.furnaceSystem.secondFurnaceBuilt) ? 1 : 0;
@@ -1717,7 +1760,14 @@
             }
         }
 
-        const decayRate = (this.isSleeping ? 0 : 0.4) * hungerMultiplier * coldHungerMult; // 睡觉时不掉饱食度
+        // 【v4.16修复】原 decayRate=0.4/游戏秒 导致饱腹250秒归零（设计值的231倍！）
+        // 正确设计：16游戏小时(57600秒)从100降到60 → 40/57600 ≈ 0.0007/游戏秒
+        // 工作中衰减加速至1.5倍
+        const isWorkingForHunger = this.workplaceName && this.currentScene === this.workplaceName;
+        const workMult = isWorkingForHunger ? 1.5 : 1.0;
+        // 【难度系统】饱腹衰减乘以难度倍率
+        const _diffHungerMult = game.getDifficultyMult ? game.getDifficultyMult('hungerDecayMult') : 1.0;
+        const decayRate = (this.isSleeping ? 0 : 0.0007) * hungerMultiplier * coldHungerMult * workMult * _diffHungerMult; // 睡觉时不掉饱食度
         this.hunger = Math.max(0, this.hunger - decayRate * dt);
 
         // 正在吃饭中
@@ -1814,8 +1864,9 @@
             return; // 提前返回，不再检查后续条件
         }
         // 【强制进食保护】饥饿<15 且有食物：最高优先级，中断当前一切非紧急任务立即进食
-        // 【修复】hunger<15无视冷却，确保NPC在极端消耗下不会饿死
-        if (this.hunger < 15 && hasFoodAvailable && !this._hungerOverride && !this.isEating && !this.isSleeping) {
+        // 【修复】hunger<15无视冷却，但仍需尊重已生效的更高优先级状态覆盖/P0事件，避免来回抢控制权
+        if (this.hunger < 15 && hasFoodAvailable && !this._hungerOverride && !this.isEating && !this.isSleeping
+            && !this._stateOverride && !(this._priorityOverride && this.hunger >= 10)) {
             // 【修复】先设置_hungerOverride防止每帧重复触发日志刷屏
             this._hungerOverride = true;
             // 中断当前任务，强制进食
@@ -1983,6 +2034,7 @@
                 this._hungerTarget = null;
                 this._hungerStuckTimer = 0;
                 this._hungerTravelTimer = 0;
+                this._hungerTriggerCooldown = Math.max(this._hungerTriggerCooldown || 0, 12);
                 this.isEating = false;
                 this._releaseBehaviorLock('eating'); // 释放可能的吃饭锁
                 console.log(`[优先级仲裁] ${this.name} 体力极低(${Math.round(this.stamina)})，打断饥饿行为优先回家休息`);
@@ -2004,6 +2056,7 @@
                 this._hungerTarget = null;
                 this._hungerStuckTimer = 0;
                 this._hungerTravelTimer = 0;
+                this._hungerTriggerCooldown = Math.max(this._hungerTriggerCooldown || 0, 12);
                 this.isEating = false;
                 this._releaseBehaviorLock('eating'); // 释放可能的吃饭锁
                 console.log(`[优先级仲裁] ${this.name} 生病/健康极低，打断饥饿行为优先看病`);
@@ -2017,7 +2070,8 @@
 
         // 优先级4：精神状态差 → 去医院找苏医生咨询（非发疯状态下的预防行为）
         // 【增强】提高触发阈值：San<35就触发（原来<25）让NPC更早开始关注精神健康
-        if (this.sanity < 35 && !this.isCrazy && !isLateNight) {
+        // 【v4.1修复】苏岩自己不触发去找自己咨询的行为
+        if (this.sanity < 35 && !this.isCrazy && !isLateNight && this.id !== 'su_doctor') {
             this._triggerStateOverride('mental', game);
             return;
         }

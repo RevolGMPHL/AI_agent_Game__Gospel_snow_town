@@ -138,10 +138,19 @@ class DeathSystem {
                 this._processNpcDeath(npc, '冻死');
             }
 
-            // 3. San值归零 + 健康低于20 → 精神崩溃致死
-            if (npc.sanity <= 0 && npc.health <= 20 && !npc.isDead) {
-                npc.health = 0;
-                this._processNpcDeath(npc, '精神崩溃致死');
+            // 3. San值归零 + 健康低于10 + 持续一段时间 → 精神崩溃致死
+            // 【修复】物资充足时不应这么快精神崩溃致死，需要持续精神归零才致命
+            if (npc.sanity <= 0 && !npc.isDead) {
+                // 累计San=0持续时间
+                if (!npc._zeroSanityDuration) npc._zeroSanityDuration = 0;
+                npc._zeroSanityDuration += this._deathCheckInterval;
+                // 持续3600秒(1游戏小时)且健康<15才致死
+                if (npc._zeroSanityDuration > 3600 && npc.health <= 15) {
+                    npc.health = 0;
+                    this._processNpcDeath(npc, '精神崩溃致死');
+                }
+            } else if (npc.sanity > 0) {
+                npc._zeroSanityDuration = 0;
             }
 
             // 4. 【新增】体力衰竭致死：体力=0持续超过2小时(7200秒) + 健康<30
@@ -259,6 +268,7 @@ class DeathSystem {
             causeDesc: causeConfig.desc,
             time: this.game.getTimeStr(),
             dayNum: this.game.dayCount,
+            gameTime: this.game.gameTimeSeconds || 0, // 用于计算死亡间隔冷却
             bodyTemp: npc.bodyTemp ? npc.bodyTemp.toFixed(1) : 'N/A',
             location: npc.currentScene || 'unknown',
             sanity: Math.round(npc.sanity || 0),
@@ -314,6 +324,22 @@ class DeathSystem {
             this.game.taskSystem.reassignDeadNpcTasks(npc.id);
         }
 
+        // 【紧急决策】有人死亡时触发紧急 council 会议，让存活者重新分工
+        if (this.game.councilSystem) {
+            const aliveCount = this.game.npcs.filter(n => !n.isDead).length;
+            if (aliveCount >= 2) {
+                // 延迟5秒触发，给死亡动画和事件通知留时间
+                setTimeout(() => {
+                    const cs = this.game.councilSystem;
+                    if (cs && !cs.isActive && !cs.isGenerating) {
+                        console.log(`[DeathSystem] ${npc.name} 死亡，触发紧急决策会议`);
+                        cs._triggerReason = `${npc.name} 不幸遇难，必须紧急重新分工`;
+                        cs.openVotingCouncil();
+                    }
+                }, 5000);
+            }
+        }
+
         // 【事件驱动镜头】通知镜头系统：NPC死亡
         if (this.game.onNPCEvent) {
             this.game.onNPCEvent(npc, 'death');
@@ -340,9 +366,19 @@ class DeathSystem {
         if (aliveNPCs.length === 0) return;
 
         // 【恐慌叠加】根据已死亡人数计算基础San打击叠加系数
+        // 【修复】加入时间冷却：1小时(3600s)内多人死亡时后续惩罚递减，避免连锁崩溃
         const deathCount = this.deathRecords.length;
-        const baseNonClosePenalty = Math.max(-25, -10 - (deathCount - 1) * 3); // 第1人-10，第2人-13，第3人-16，上限-25
-        const baseClosePenalty = Math.max(-40, -25 - (deathCount - 1) * 3);    // 亲密者叠加，上限-40
+        const recentDeaths = this.deathRecords.filter(r => {
+            // 使用dayNum×86400+gameTimeSeconds计算绝对游戏时间
+            const currentAbsTime = (this.game.dayCount || 1) * 86400 + (this.game.gameTimeSeconds || 0);
+            const recordAbsTime = (r.dayNum || 1) * 86400 + (r.gameTime || 0);
+            const elapsed = currentAbsTime - recordAbsTime;
+            return elapsed >= 0 && elapsed < 3600; // 1游戏小时内的死亡
+        }).length;
+        // 短时间内连续死亡时，后续惩罚递减（第2人×0.7，第3人×0.5，第4人+×0.3）
+        const recentDampen = recentDeaths <= 1 ? 1.0 : recentDeaths === 2 ? 0.7 : recentDeaths === 3 ? 0.5 : 0.3;
+        const baseNonClosePenalty = Math.max(-20, Math.round((-10 - (deathCount - 1) * 2) * recentDampen)); // 降低叠加速率，上限-20
+        const baseClosePenalty = Math.max(-30, Math.round((-20 - (deathCount - 1) * 2) * recentDampen));    // 亲密者叠加，上限-30
 
         // 【角色针对性】根据死者角色生成针对性事件文本
         let roleSpecificText = '';

@@ -18,8 +18,8 @@
         if (specialties.gathering_explore) descParts.push(`废墟探索加成`);
         if (specialties.gathering_food) descParts.push(`食物采集×${specialties.gathering_food}`);
         if (specialties.generator_repair) descParts.push(`发电机维修×${specialties.generator_repair}`);
+        // furnace_maintain 已移除（v4.13）
         if (specialties.furnace_build) descParts.push(`暖炉扩建×${specialties.furnace_build}`);
-        if (specialties.furnace_maintain) descParts.push(`暖炉维护×${specialties.furnace_maintain}`);
         if (specialties.construction) descParts.push(`建造×${specialties.construction}`);
         // 辅助类
         if (specialties.inventory_waste) descParts.push(`物资管理减少浪费${(specialties.inventory_waste * 100).toFixed(0)}%`);
@@ -38,7 +38,7 @@
         if (specialties.field_aid) descParts.push(`野外急救×${specialties.field_aid}`);
         if (specialties.cold_resist) descParts.push(`耐寒（体温下降×${specialties.cold_resist}）`);
         if (specialties.trap_alarm) descParts.push('可制作陷阱/警报');
-        if (specialties.radio_repair) descParts.push('可修理无线电');
+        // radio_repair已移除（v4.6）
         if (specialties.climb_explore) descParts.push('可进入危险区域');
         if (specialties.crisis_predict) descParts.push('经验预警');
         if (specialties.learn_others) descParts.push(`学习效率×${specialties.learn_others}`);
@@ -66,10 +66,7 @@
             case 'craft_medkit':
                 if (specialties.herbal_craft) return specialties.herbal_craft;
                 break;
-            case 'repair_radio':
-                // radio_repair 是 boolean(true)，转化为1.5倍率
-                if (specialties.radio_repair) return typeof specialties.radio_repair === 'number' ? specialties.radio_repair : 1.5;
-                break;
+            // repair_radio 已移除（v4.5）
             case 'medical_heal':
                 if (specialties.medical_treatment) return specialties.medical_treatment;
                 break;
@@ -77,9 +74,7 @@
                 if (specialties.morale_boost) return specialties.morale_boost;
                 if (specialties.morale_inspire) return specialties.morale_inspire;
                 break;
-            case 'furnace_maintain':
-                if (specialties.furnace_maintain) return specialties.furnace_maintain;
-                break;
+            // furnace_maintain 已移除（v4.13）
             case 'reduce_waste':
                 if (specialties.food_processing) return specialties.food_processing;
                 break;

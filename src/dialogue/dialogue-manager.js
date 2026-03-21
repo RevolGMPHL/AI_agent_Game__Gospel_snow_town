@@ -959,6 +959,10 @@ let reply = await GST.callLLM(systemPrompt, userPrompt, debugMode2 ? 100 : 300);
         if (this.game && this.game.taskSystem) {
             taskContext = `你的当前任务: ${this.game.taskSystem.getNpcTaskDescForPrompt(speaker.id)}`;
         }
+        // 【v4.7】注入位置语境，让LLM知道NPC在哪里，对话内容才能匹配场景
+        const speakerLoc = speaker.getLocationLabel ? speaker.getLocationLabel() : speaker.currentScene;
+        const listenerLoc = listener.getLocationLabel ? listener.getLocationLabel() : listener.currentScene;
+        const locationContext = `你现在在「${speakerLoc}」，${listener.name}也在「${listenerLoc}」。`;
 
         // 【死亡系统】注入死亡记录摘要
         let deathContext = '';
@@ -978,7 +982,7 @@ let reply = await GST.callLLM(systemPrompt, userPrompt, debugMode2 ? 100 : 300);
 你正在和「${listener.name}」（${listener.gender || '男'}性，${listener.occupation}）面对面聊天。
 ${relationDesc}${cooldownHint}${memoryHint}${sanityHint}${careHint}
 
-${blizzardContext ? blizzardContext + '\n' : ''}${survivalContext ? survivalContext + '\n' : ''}${taskContext ? taskContext + '\n' : ''}${deathContext ? deathContext + '\n' : ''}${pastLifeHint ? pastLifeHint + '\n' : ''}
+${blizzardContext ? blizzardContext + '\n' : ''}${survivalContext ? survivalContext + '\n' : ''}${locationContext}\n${taskContext ? taskContext + '\n' : ''}${deathContext ? deathContext + '\n' : ''}${pastLifeHint ? pastLifeHint + '\n' : ''}
 重要规则：
 1. 你必须直接回应对方刚说的话，不能各说各的。
 2. 说话要口语化、自然（1-3句话）。每次说话要有新的信息量，不要重复之前说过的内容和用词。
@@ -986,6 +990,7 @@ ${blizzardContext ? blizzardContext + '\n' : ''}${survivalContext ? survivalCont
 4. 不要JSON格式，直接说话。
 5. 🚨 你们正处于末日生存环境！暴风雪随时可能夺走所有人的生命！你的对话内容必须围绕生存——讨论物资准备、暖炉修建、任务进展、身体状况、逃生计划等。不要聊无关紧要的闲话！每一句话都应该对度过暴风雪有帮助。可以互相鼓励、商量对策、交流信息、协调分工。
 6. 积极回应，可以追问、分享看法、讲自身经历，让对话有深度和趣味。如果当前话题快说完了，可以自然地转到另一个与生存相关的话题。
+${this.game && this.game.reincarnationSystem && this.game.reincarnationSystem.getLifeNumber() > 1 ? '7. 🔮【轮回记忆】上方有前世记忆信息作为背景参考。你可以根据对话情境自然地引用前世经验，但不需要每次都提。前世记忆只是你的参考情报之一，你的对话应主要围绕当前的实际状况展开。' : '7. 这是第一世，你没有任何前世记忆。不要提及"上一世""前世""轮回"等概念，专注于当前的末日生存处境。'}
 ${turnCount >= (this.game && this.game.mode === 'debug' ? 3 : 6) ? '6. 如果话题真的完全聊尽了，你可以自然地说再见/告辞，并在回复末尾加 [END] 标记（不会展示给对方）。但只要还有一点可聊的就继续。' : '6. 请继续积极聊天，不要急着结束对话。你可以追问细节、延伸话题、聊聊自己的经历或想法。'}${forceEnd ? '\n你们已经聊了很久了，请现在结束对话，在末尾加 [END]。' : ''}${philoHint}`;
 
         const userPrompt = `${chatHistory ? '对话记录（已' + turnCount + '轮）：\n' + chatHistory + '\n\n' : ''}${situationHint}

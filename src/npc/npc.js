@@ -39,6 +39,12 @@
         this._yieldMove = null;         // 让路临时目标 { x, y }（格子坐标）
         this._yieldTimer = 0;           // 让路等待计时
 
+        // 【v4.16】坐标抖动检测器 — 检测NPC在同一场景内频繁来回跑
+        this._jitterSamples = [];        // 环形缓冲区：[{x, y, scene, t}]，最多保留12个采样
+        this._jitterSampleTimer = 0;     // 采样计时器（每0.3秒采样一次）
+        this._jitterFreezeTimer = 0;     // 抖动冻结倒计时（被冻结时不执行移动）
+        this._jitterDetectCount = 0;     // 累计检测到抖动的次数（用于日志）
+
         // 动画
         this.animFrame = 0;
         this.animTimer = 0;
@@ -240,14 +246,23 @@ this.affinity = { qing_xuan: 72 };
         // ============ 任务驱动覆盖系统（三层优先级P1层） ============
         this._taskOverride = {
             taskId: null,           // 当前覆盖的任务ID
+            source: 'task',         // 外部来源：task/council/action/system
             targetLocation: null,   // 目标位置key（SCHEDULE_LOCATIONS中的key）
             isActive: false,        // 是否激活
             priority: 'normal',     // 优先级: 'urgent'|'high'|'normal'
             resourceType: null,     // 关联的资源类型（用于采集任务）
+            stateDesc: null,        // 展示/兼容文案
+            displayDesc: null,      // 显式展示文案（不承担业务语义）
+            effectKey: null,        // 显式行为效果键，优先于stateDesc关键词匹配
+            intentId: null,         // 关联的外部意图ID
+            pausedBy: null,         // 最近一次暂停来源
+            pausedReason: null,     // 最近一次暂停原因
         };
         this._taskOverrideStuckTimer = 0;  // 任务覆盖卡住检测
         this._taskOverrideTravelTimer = 0; // 任务覆盖超时兜底
         this._behaviorPriority = 'P2';     // 当前行为层级标记: 'P0'|'P1'|'P2'
+        this._behaviorOwner = 'schedule';  // 当前行为控制方: 'priority'|'task'|'hunger'|'state'|'resource'|'action'|'schedule'
+        this._behaviorReason = 'default_schedule'; // 当前行为控制原因（调试/仲裁输出）
 
         // ============ 日程导航超时兜底 ============
         this._navStartTime = 0;            // 导航开始时间（Date.now()）
@@ -256,7 +271,11 @@ this.affinity = { qing_xuan: 72 };
 
         // ============ LLM行动决策系统 ============
         this._actionDecisionCooldown = 0;       // 行动决策冷却计时器（秒）
-        this._actionDecisionInterval = 45 + Math.random() * 30; // 45~75秒做一次行动决策
+        this._actionDecisionInterval = 25 + Math.random() * 20; // 【v4.14】25~45秒做一次行动决策（白天行为的唯一驱动力，从45~75秒缩短）
+        this._intentSeq = 0;                    // 统一意图序号（第一阶段骨架）
+        this._pendingIntent = null;             // 待仲裁/待恢复执行的意图对象
+        this._currentIntent = null;             // 当前生效中的意图对象
+        this._lastIntentArbitration = null;     // 最近一次意图仲裁结果（调试/观测用）
         this._pendingAction = null;             // 待执行的行动 { type, target, reason, priority, companion }
         this._currentAction = null;             // 正在执行的行动
         this._actionOverride = false;           // 是否正在覆盖日程
@@ -396,12 +415,13 @@ this.affinity = { qing_xuan: 72 };
      */
 
     _acquireBehaviorLock(type, priority, callback) {
+        const lockStartTime = Date.now();
         // 无锁时直接获取
         if (!this._currentBehaviorLock) {
             this._currentBehaviorLock = {
                 type: type,
                 priority: priority,
-                startTime: this.game ? this.game.gameTime : Date.now()
+                startTime: lockStartTime
             };
             this._logDebug('override', `[行为锁] 获取锁: ${type}(优先级${priority})`);
             return true;
@@ -415,7 +435,7 @@ this.affinity = { qing_xuan: 72 };
             this._currentBehaviorLock = {
                 type: type,
                 priority: priority,
-                startTime: this.game ? this.game.gameTime : Date.now()
+                startTime: lockStartTime
             };
             return true;
         }
@@ -514,6 +534,321 @@ this.affinity = { qing_xuan: 72 };
     }
 
     /**
+     * 将动作包装成统一意图对象（第一阶段骨架）
+     * 先把LLM输出从“直接执行动作”升级为“提交意图”，后续再逐步接入更多来源
+     * @param {{ type: string, target?: string, reason?: string, priority?: string, companion?: string }} action
+     * @param {{ source?: string, category?: string, reasoning?: string, threatAnalysis?: string, opportunityAnalysis?: string }} options
+     * @returns {{ id: string, source: string, category: string, priority: string, action: Object|null, reasoning: string, threatAnalysis: string, opportunityAnalysis: string, createdAt: number }}
+     */
+    _createIntentFromAction(action, options = {}) {
+        this._intentSeq = (this._intentSeq || 0) + 1;
+        const normalizedAction = action ? {
+            ...action,
+            displayDesc: action.displayDesc || action.reason || '',
+            effectKey: action.effectKey || null,
+            sourceTaskId: action.sourceTaskId || null,
+        } : null;
+        return {
+            id: `${this.id}_intent_${this._intentSeq}`,
+            source: options.source || 'llm',
+            category: options.category || 'action',
+            priority: normalizedAction?.priority || 'normal',
+            action: normalizedAction,
+            reasoning: options.reasoning || '',
+            threatAnalysis: options.threatAnalysis || '',
+            opportunityAnalysis: options.opportunityAnalysis || '',
+            metadata: options.metadata ? { ...options.metadata } : {},
+            createdAt: this.game ? this.game.gameTime : Date.now(),
+        };
+    }
+
+    /**
+     * 统一仲裁单个意图（第一阶段）
+     * 当前先做最小侵入式接入：系统只决定立即执行、挂起等待还是拒绝
+     * @param {{ source?: string, priority?: string, action?: Object }} intent
+     * @returns {{ decision: string, reason: string, control: { owner: string, priority: string, reason: string, blocksSchedule: boolean } }}
+     */
+    _arbitrateIntent(intent) {
+        const control = this._refreshBehaviorControl();
+
+        if (!intent || !intent.action) {
+            return { decision: 'reject', reason: 'invalid_intent', control };
+        }
+        if (this.isDead) {
+            return { decision: 'reject', reason: 'dead', control };
+        }
+        if (this.state === 'CHATTING') {
+            return { decision: 'reject', reason: 'chatting', control };
+        }
+        if (this._currentBehaviorLock) {
+            return { decision: 'pending', reason: `behavior_lock:${this._currentBehaviorLock.type}`, control };
+        }
+        if (control.priority === 'P0') {
+            return { decision: 'pending', reason: `blocked_by_${control.owner}:${control.reason}`, control };
+        }
+        if (intent.priority === 'urgent') {
+            return { decision: 'execute', reason: 'urgent_intent', control };
+        }
+        if (this._stateOverride || this._hungerOverride || this._isBeingTreated) {
+            return {
+                decision: 'pending',
+                reason: this._stateOverride || (this._hungerOverride ? 'hunger_override' : 'being_treated'),
+                control,
+            };
+        }
+        if (this._taskOverride && this._taskOverride.isActive) {
+            if (intent.category === 'external_task') {
+                const priorityOrder = { low: 0, normal: 1, high: 2, urgent: 3 };
+                const currentPriority = priorityOrder[this._taskOverride.priority || 'normal'] ?? 1;
+                const incomingPriority = priorityOrder[intent.priority || intent.action?.priority || 'normal'] ?? 1;
+                if (incomingPriority < currentPriority) {
+                    return {
+                        decision: 'pending',
+                        reason: `task_override:${this._taskOverride.taskId || 'active'}`,
+                        control,
+                    };
+                }
+            }
+            return {
+                decision: 'execute',
+                reason: `task_preemptible:${this._taskOverride.taskId || 'active'}`,
+                control,
+            };
+        }
+
+        return { decision: 'execute', reason: 'intent_allowed', control };
+    }
+
+    /**
+     * 统一提交意图（第一阶段）
+     * 这是LLM意图进入执行层的唯一入口，后续可逐步扩展到任务/生存/会议等来源
+     * @param {{ id: string, source: string, priority: string, action: Object }} intent
+     * @param {Object} game
+     * @returns {'execute'|'pending'|'reject'}
+     */
+    _submitIntent(intent, game) {
+        const arbitration = this._arbitrateIntent(intent);
+        this._lastIntentArbitration = {
+            ...arbitration,
+            intentId: intent ? intent.id : null,
+            time: game ? game.gameTime : Date.now(),
+        };
+
+        const isExternalTask = intent?.category === 'external_task';
+        const externalMeta = isExternalTask ? (intent.metadata || {}) : null;
+        const applyExternalTaskOverride = deferActivation => {
+            const targetLocation = externalMeta?.targetLocation || intent?.action?.target || null;
+            if (!targetLocation || typeof this.activateTaskOverride !== 'function') {
+                return false;
+            }
+            return this.activateTaskOverride(
+                externalMeta?.taskId || intent.id,
+                targetLocation,
+                intent.priority || intent?.action?.priority || 'normal',
+                externalMeta?.resourceType || null,
+                externalMeta?.stateDesc || externalMeta?.displayDesc || intent?.action?.reason || '执行任务',
+                {
+                    source: intent.source || 'system',
+                    displayDesc: externalMeta?.displayDesc || externalMeta?.stateDesc || intent?.action?.reason || '执行任务',
+                    effectKey: externalMeta?.effectKey || intent?.action?.effectKey || null,
+                    intentId: intent.id,
+                    deferActivation,
+                }
+            );
+        };
+
+        if (arbitration.decision === 'execute') {
+            this._pendingIntent = null;
+            this._pendingAction = null;
+
+            if (isExternalTask) {
+                const accepted = applyExternalTaskOverride(false);
+                if (!accepted) {
+                    this._logDebug('schedule', `[外部意图执行失败] ${intent?.source || 'system'}:${externalMeta?.taskId || intent?.id || 'no_task'}`);
+                    return 'reject';
+                }
+                this._currentIntent = intent;
+                return 'execute';
+            }
+
+            this._currentIntent = intent;
+            this._executeAction(intent.action, game);
+            return 'execute';
+        }
+
+        if (arbitration.decision === 'pending') {
+            if (isExternalTask) {
+                const accepted = applyExternalTaskOverride(true);
+                if (!accepted) {
+                    this._logDebug('schedule', `[外部意图挂起失败] ${intent?.source || 'system'}:${externalMeta?.taskId || intent?.id || 'no_task'}`);
+                    return 'reject';
+                }
+            }
+
+            this._pendingIntent = intent;
+            this._pendingAction = isExternalTask ? null : intent.action;
+            this._logDebug('action', `[意图挂起] ${intent.source}:${intent.action?.type || intent.category || 'unknown'} 原因:${arbitration.reason}`);
+            return 'pending';
+        }
+
+        this._logDebug('action', `[意图拒绝] ${intent?.source || 'unknown'}:${intent?.action?.type || intent?.category || 'unknown'} 原因:${arbitration.reason}`);
+        return 'reject';
+    }
+
+    /**
+     * 外部系统提交显式意图（task/council/system）
+     * 第一阶段先桥接到兼容层taskOverride，但入口统一为intent，避免外部系统再直接控制NPC状态
+     * @param {{ source?: string, taskId?: string, targetLocation?: string, priority?: string, resourceType?: string, stateDesc?: string, displayDesc?: string, effectKey?: string }} request
+     * @returns {boolean}
+     */
+    _submitExternalIntent(request = {}) {
+        const action = {
+            type: 'go_to',
+            target: request.targetLocation || null,
+            reason: request.displayDesc || request.stateDesc || '执行任务',
+            priority: request.priority || 'normal',
+            displayDesc: request.displayDesc || request.stateDesc || '执行任务',
+            effectKey: request.effectKey || null,
+            sourceTaskId: request.taskId || null,
+        };
+        const intent = this._createIntentFromAction(action, {
+            source: request.source || 'system',
+            category: 'external_task',
+            metadata: {
+                taskId: request.taskId || null,
+                targetLocation: request.targetLocation || null,
+                resourceType: request.resourceType || null,
+                stateDesc: request.stateDesc || null,
+                displayDesc: request.displayDesc || null,
+                effectKey: request.effectKey || null,
+            },
+        });
+
+        const result = this._submitIntent(intent, this.game);
+        if (result === 'reject') {
+            this._logDebug('schedule', `[外部意图拒绝] ${request.source || 'system'}:${request.taskId || 'no_task'}`);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 统一行为仲裁：判断当前是否应由非日程系统接管
+     * 输出统一的 owner / priority / reason，供各子系统消费
+     * @returns {{ owner: string, priority: string, reason: string, blocksSchedule: boolean }}
+     */
+    _resolveBehaviorControl() {
+        if (this._priorityOverride) {
+            return {
+                owner: 'priority',
+                priority: 'P0',
+                reason: this._priorityOverride,
+                blocksSchedule: true,
+            };
+        }
+
+        if (this._taskOverride && this._taskOverride.isActive && this._taskOverride.targetLocation) {
+            return {
+                owner: 'task',
+                priority: 'P1',
+                reason: this._taskOverride.taskId || 'task_override',
+                blocksSchedule: true,
+            };
+        }
+
+        if (this._stateOverride || this._isBeingTreated) {
+            return {
+                owner: 'state',
+                priority: 'P1',
+                reason: this._stateOverride || 'being_treated',
+                blocksSchedule: true,
+            };
+        }
+
+        if (this._hungerOverride && (this._hungerTarget || this.isEating)) {
+            return {
+                owner: 'hunger',
+                priority: 'P1',
+                reason: this._hungerTarget ? this._hungerTarget.target : 'eating',
+                blocksSchedule: true,
+            };
+        }
+
+        if (this._resourceGatherOverride && this._resourceGatherTarget) {
+            return {
+                owner: 'resource',
+                priority: 'P1',
+                reason: `${this._resourceGatherType || 'resource'}:${this._resourceGatherTarget}`,
+                blocksSchedule: true,
+            };
+        }
+
+        if (this._actionOverride && (this._actionTarget || this._isCompanion || this._restCooldownTimer > 0)) {
+            return {
+                owner: 'action',
+                priority: 'P1',
+                reason: this._actionTarget ? this._actionTarget.target : (this._currentAction?.type || 'action_override'),
+                blocksSchedule: true,
+            };
+        }
+
+        if (this._isCompanion && this._companionDestination) {
+            return {
+                owner: 'action',
+                priority: 'P1',
+                reason: `companion:${this._companionDestination}`,
+                blocksSchedule: true,
+            };
+        }
+
+        return {
+            owner: 'schedule',
+            priority: 'P2',
+            reason: 'default_schedule',
+            blocksSchedule: false,
+        };
+    }
+
+    /**
+     * 刷新统一行为仲裁快照，避免各模块分散重复推导
+     * @returns {{ owner: string, priority: string, reason: string, blocksSchedule: boolean }}
+     */
+    _refreshBehaviorControl() {
+        const control = this._resolveBehaviorControl();
+        this._behaviorOwner = control.owner;
+        this._behaviorPriority = control.priority;
+        this._behaviorReason = control.reason;
+        return control;
+    }
+
+    /**
+     * 获取面向日程系统的统一仲裁视图
+     * 让 schedule 模块只消费这一层，而不是直接耦合各类 override 字段
+     * @returns {{ owner: string, priority: string, reason: string, blocksSchedule: boolean, canRetargetFromSchedule: boolean, canRecoverTimeout: boolean, canRetryScheduleNavigation: boolean, canUseDoorSafetyNet: boolean, canCorrectArrivalOffset: boolean, canRunPostArrivalBehavior: boolean }}
+     */
+    _getScheduleControl() {
+        const control = this._refreshBehaviorControl();
+        const canScheduleAct = !control.blocksSchedule;
+        return {
+            ...control,
+            canRetargetFromSchedule: canScheduleAct,
+            canRecoverTimeout: canScheduleAct,
+            canRetryScheduleNavigation: canScheduleAct,
+            canUseDoorSafetyNet: canScheduleAct,
+            canCorrectArrivalOffset: canScheduleAct,
+            canRunPostArrivalBehavior: canScheduleAct,
+        };
+    }
+
+    /**
+     * 当前是否存在比日程更高优先级的控制方
+     * @returns {boolean}
+     */
+    _isScheduleBlocked() {
+        return this._getScheduleControl().blocksSchedule;
+    }
+
+    /**
      * 获取P0紧急层的动态阈值（根据当前行为锁优先级调整）
      * @returns {{ healthThreshold: number, staminaThreshold: number, tempThreshold: number }}
      */
@@ -542,12 +877,12 @@ this.affinity = { qing_xuan: 72 };
      */
 
     _checkBehaviorLockTimeout() {
-        if (!this._currentBehaviorLock || !this.game) return;
-        const elapsed = this.game.gameTime - this._currentBehaviorLock.startTime;
-        if (elapsed > 120) { // 120秒游戏时间
+        if (!this._currentBehaviorLock) return;
+        const elapsed = (Date.now() - this._currentBehaviorLock.startTime) / 1000;
+        if (elapsed > 120) { // 120秒真实时间
             const lockType = this._currentBehaviorLock.type;
             const lockPriority = this._currentBehaviorLock.priority;
-            console.warn(`[行为锁超时] ${this.name} 行为锁 ${lockType}(${lockPriority}) 持续${elapsed.toFixed(0)}秒游戏时间，强制释放`);
+            console.warn(`[行为锁超时] ${this.name} 行为锁 ${lockType}(${lockPriority}) 持续${elapsed.toFixed(0)}秒真实时间，强制释放`);
             this._logDebug('override', `[行为锁超时] ${lockType}(${lockPriority}) 持续${elapsed.toFixed(0)}秒，强制释放`);
             this._currentBehaviorLock = null;
             // 清空pending队列中过期的行为
@@ -562,6 +897,41 @@ this.affinity = { qing_xuan: 72 };
             x: Math.floor((this.x + this.width / 2) / GST.TILE),
             y: Math.floor((this.y + this.height / 2) / GST.TILE)
         };
+    }
+
+    /**
+     * 获取NPC当前位置的中文标签（通用，基于坐标就近匹配）
+     * 室内场景直接返回场景名，户外场景通过就近匹配SCHEDULE_LOCATIONS地标
+     */
+    getLocationLabel() {
+        const SCENE_LABELS = {
+            warehouse: '仓库', medical: '医疗站',
+            dorm_a: '宿舍A', dorm_b: '宿舍B',
+            kitchen: '炊事房', workshop: '工坊'
+        };
+        if (this.currentScene !== 'village') {
+            return SCENE_LABELS[this.currentScene] || this.currentScene;
+        }
+        // 户外：就近匹配已知地标
+        const OUTDOOR_LABELS = {
+            furnace_plaza: '暖炉广场', lumber_camp: '伐木场',
+            frozen_lake: '冰湖', ruins_site: '废墟采集场',
+            ore_pile: '矿渣堆', north_gate: '北门', south_gate: '南门',
+            warehouse_door: '仓库门口', medical_door: '医疗站门口',
+            dorm_a_door: '宿舍A门口', dorm_b_door: '宿舍B门口',
+            kitchen_door: '炊事房门口', workshop_door: '工坊门口'
+        };
+        const pos = this.getGridPos();
+        let bestKey = null, bestDist = Infinity;
+        const locs = GST.SCHEDULE_LOCATIONS;
+        for (const key in OUTDOOR_LABELS) {
+            const loc = locs[key];
+            if (!loc || loc.scene !== 'village') continue;
+            const d = Math.abs(pos.x - loc.x) + Math.abs(pos.y - loc.y);
+            if (d < bestDist) { bestDist = d; bestKey = key; }
+        }
+        if (bestKey && bestDist <= 8) return OUTDOOR_LABELS[bestKey];
+        return '村庄户外';
     }
 
     addMemory(data) {
@@ -698,10 +1068,10 @@ this.affinity = { qing_xuan: 72 };
         if (this._outdoorCooldown > 0) this._outdoorCooldown -= _realDt;
 
         // 【休息缓冲期递减】缓冲期结束时恢复日程接管
-        // 【行为锁优化】改为条件驱动：体力>=40或经过60秒游戏时间
+        // 【行为锁优化】改为条件驱动：体力>=40或经过60秒真实时间
         if (this._restCooldownTimer > 0) {
-            this._restCooldownTimer -= dt;
-            // 【硬保护B4】缓冲期内渐进恢复体力（每秒+2）
+            this._restCooldownTimer -= _realDt;
+            // 【硬保护B4】缓冲期内渐进恢复体力（按游戏时间恢复，保证高倍速恢复效率同步提升）
             this.stamina = Math.min(100, this.stamina + 2 * dt);
             // 【边界保护】极度饥饿(hunger<10)可以穿透休息缓冲期
             if (this.hunger < 10) {
@@ -738,7 +1108,7 @@ this.affinity = { qing_xuan: 72 };
         if (this._affinityCooldown) {
             for (const id in this._affinityCooldown) {
                 if (this._affinityCooldown[id] > 0) {
-                    this._affinityCooldown[id] -= dt;
+                    this._affinityCooldown[id] -= _realDt;
                 }
             }
         }
@@ -823,10 +1193,13 @@ this.affinity = { qing_xuan: 72 };
         this._checkResourceGatherNeed(game);
         this._updateResourceGatherOverride(dt, game);
 
+        // 统一行为仲裁快照：在进入AI/日程前收敛当前控制权
+        this._refreshBehaviorControl();
+
         // 【v2.0-优化】资源紧张时强制结束聊天（基于 tension 统一判断）
         if (this.state === 'CHATTING' && game && game.resourceSystem) {
             if (!this._chatUrgencyCheckTimer) this._chatUrgencyCheckTimer = 0;
-            this._chatUrgencyCheckTimer += dt;
+            this._chatUrgencyCheckTimer += _realDt;
             if (this._chatUrgencyCheckTimer >= 5) { // 每5秒检查一次
                 this._chatUrgencyCheckTimer = 0;
                 const tension = game.resourceSystem.getResourceTension();
@@ -846,15 +1219,20 @@ this.affinity = { qing_xuan: 72 };
         // 下雨避雨检查
         this._updateRainResponse(game);
 
-        // 日程检查
+        // 日程检查（P0紧急+P1任务+睡觉日程，白天不再驱动导航）
         this._updateSchedule(dt, game);
+
+        // 【v4.14】LLM行动决策定时调用（冷却到0时自动触发，白天NPC行为的唯一驱动力）
+        if (this._actionDecisionCooldown <= 0 && !this.isDead) {
+            this._actionDecision(game);
+        }
 
         // 【兜底】发呆检测与自动恢复
         this._updateIdleWatchdog(dt, game);
 
         // 【增强】让路逻辑处理：如果被碰撞系统指派了让路目标，优先执行让路移动
         if (this._yieldMove) {
-            this._yieldTimer = (this._yieldTimer || 0) + dt;
+            this._yieldTimer = (this._yieldTimer || 0) + _realDt;
             const ytx = this._yieldMove.x * GST.TILE;
             const yty = this._yieldMove.y * GST.TILE;
             const ydx = ytx - this.x;
@@ -992,17 +1370,21 @@ this.affinity = { qing_xuan: 72 };
             this.isMoving = false;
             // 静止时逐渐衰减碰撞累积计时器
             if (this.collisionStallTimer > 0) {
-                this.collisionStallTimer = Math.max(0, this.collisionStallTimer - dt * 0.3);
+                this.collisionStallTimer = Math.max(0, this.collisionStallTimer - _realDt * 0.3);
             }
         }
 
         // 【修复】位置合法性检测：站着不动的NPC如果被碰撞推进了墙壁/实体区域，自动恢复
-        if (!this.isMoving && this.currentPath.length === 0) {
+        // 加冷却（5秒），避免每帧触发导致日志刷屏
+        if (!this._posFixCooldown) this._posFixCooldown = 0;
+        this._posFixCooldown = Math.max(0, this._posFixCooldown - dt);
+        if (!this.isMoving && this.currentPath.length === 0 && this._posFixCooldown <= 0) {
             const map = game.maps[this.currentScene];
             if (map && map.isSolid(this.x + GST.TILE / 2, this.y + GST.TILE / 2)) {
-                // NPC当前位置在实体区域内，搜索最近的可通行位置
+                this._posFixCooldown = 5; // 5秒冷却
+                // NPC当前位置在实体区域内，搜索最近1-2格的可通行位置（限制范围避免远距离闪现）
                 let found = false;
-                for (let r = 1; r <= 5 && !found; r++) {
+                for (let r = 1; r <= 2 && !found; r++) {
                     for (let dy = -r; dy <= r && !found; dy++) {
                         for (let dx = -r; dx <= r && !found; dx++) {
                             if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; // 只查外圈
@@ -1020,8 +1402,8 @@ this.affinity = { qing_xuan: 72 };
             }
         }
 
-        // AI 思考冷却
-        this.aiCooldown -= dt;
+        // AI 思考冷却（真实时间，避免高倍速下思考频率暴涨）
+        this.aiCooldown -= _realDt;
 
         // 动画
         if (this.isMoving) {
@@ -1031,12 +1413,166 @@ this.affinity = { qing_xuan: 72 };
             this.animFrame = 0;
             this.animTimer = 0;
         }
+
+        // 【v4.16】坐标抖动检测 — 检测NPC在同一场景内频繁来回跑
+        this._updateJitterDetection(dt, game);
+    }
+
+    /**
+     * 【v4.16】坐标抖动检测系统
+     * 
+     * 原理：每0.3秒采样一次NPC坐标，维护最近12个采样点的环形缓冲区。
+     * 在最近3.6秒窗口内，如果NPC在同一场景下X或Y方向翻转次数 ≥ 4次，
+     * 判定为"抖动/来回跑"，自动冻结NPC 15秒。
+     * 
+     * "方向翻转"定义：相邻两个采样之间的移动方向（dx符号或dy符号）
+     * 与前一个采样对的方向相反。例如：先向右3格，再向左2格，就是一次X方向翻转。
+     * 
+     * 触发后行为：
+     * - 清除路径和移动状态
+     * - 清除 _actionOverride（防止卡在行动循环中）
+     * - 设置冻结计时器 15秒
+     * - 冻结期间 _followPath 会被跳过（通过 _jitterFreezeTimer > 0 检查）
+     * - 输出明显的控制台警告
+     */
+    _updateJitterDetection(dt, game) {
+        // 冻结期间：倒计时并跳过采样
+        if (this._jitterFreezeTimer > 0) {
+            const speedMult = (game && game.speedOptions) ? game.speedOptions[game.speedIdx] : 1;
+            const realDt = speedMult > 0 ? dt / speedMult : dt;
+            this._jitterFreezeTimer -= realDt;
+            if (this._jitterFreezeTimer <= 0) {
+                this._jitterFreezeTimer = 0;
+                this._jitterSamples = []; // 解冻后清空采样历史
+                console.log(`[抖动检测] ${this.name} 冻结结束，恢复正常行为`);
+            }
+            return;
+        }
+
+        // 睡觉/死亡/聊天/发疯状态下不检测
+        if (this.isSleeping || this.isDead || this.state === 'CHATTING' || this.isCrazy) {
+            this._jitterSamples = [];
+            return;
+        }
+
+        // 采样计时（使用真实时间避免倍速干扰）
+        const speedMult = (game && game.speedOptions) ? game.speedOptions[game.speedIdx] : 1;
+        const realDt = speedMult > 0 ? dt / speedMult : dt;
+        this._jitterSampleTimer += realDt;
+        if (this._jitterSampleTimer < 0.3) return; // 每0.3秒真实时间采样一次
+        this._jitterSampleTimer = 0;
+
+        // 采样当前坐标（转为格子坐标，减少浮点噪声）
+        const gx = Math.floor(this.x / GST.TILE);
+        const gy = Math.floor(this.y / GST.TILE);
+        const scene = this.currentScene;
+        const now = Date.now();
+
+        this._jitterSamples.push({ x: gx, y: gy, scene, t: now });
+        // 环形缓冲：最多保留12个采样
+        if (this._jitterSamples.length > 12) {
+            this._jitterSamples.shift();
+        }
+
+        // 至少需要5个采样才能做有意义的检测
+        if (this._jitterSamples.length < 5) return;
+
+        // 只看同一场景的最近采样
+        const samples = this._jitterSamples;
+        const currentScene = samples[samples.length - 1].scene;
+
+        // 统计方向翻转次数
+        let xReversals = 0;
+        let yReversals = 0;
+        let prevDx = 0;
+        let prevDy = 0;
+        let sameSceneCount = 0;
+        let totalMoveDist = 0; // 总移动距离（格子）
+
+        for (let i = 1; i < samples.length; i++) {
+            if (samples[i].scene !== currentScene || samples[i - 1].scene !== currentScene) {
+                // 跨场景的采样不参与检测
+                prevDx = 0;
+                prevDy = 0;
+                continue;
+            }
+            sameSceneCount++;
+
+            const dx = samples[i].x - samples[i - 1].x;
+            const dy = samples[i].y - samples[i - 1].y;
+            totalMoveDist += Math.abs(dx) + Math.abs(dy);
+
+            // 方向翻转检测（忽略静止不动的采样，即dx/dy为0）
+            if (dx !== 0 && prevDx !== 0 && Math.sign(dx) !== Math.sign(prevDx)) {
+                xReversals++;
+            }
+            if (dy !== 0 && prevDy !== 0 && Math.sign(dy) !== Math.sign(prevDy)) {
+                yReversals++;
+            }
+
+            if (dx !== 0) prevDx = dx;
+            if (dy !== 0) prevDy = dy;
+        }
+
+        const totalReversals = xReversals + yReversals;
+
+        // 判定条件：
+        // 1. 同场景采样 ≥ 4个
+        // 2. 方向翻转总次数 ≥ 4次（X和Y合计）
+        // 3. 总移动距离 ≥ 4格（排除原地抖动/微小碰撞推挤噪声）
+        if (sameSceneCount >= 4 && totalReversals >= 4 && totalMoveDist >= 4) {
+            this._jitterDetectCount++;
+
+            // 构建详细日志
+            const posLog = samples.map(s => `(${s.x},${s.y}@${s.scene})`).join(' → ');
+            console.warn(`⚠️ [抖动检测] ${this.name} 在 ${currentScene} 中来回跑！`
+                + `\n  翻转次数: X=${xReversals} Y=${yReversals} 总计=${totalReversals}`
+                + `\n  总移动距离: ${totalMoveDist}格`
+                + `\n  累计检测次数: ${this._jitterDetectCount}`
+                + `\n  坐标轨迹: ${posLog}`
+                + `\n  当前行动: ${this.stateDesc || '无'}`
+                + `\n  actionOverride: ${!!this._actionOverride}, actionTarget: ${this._actionTarget || '无'}`
+                + `\n  → 自动冻结15秒`);
+
+            // 冻结NPC
+            this.currentPath = [];
+            this.pathIndex = 0;
+            this.isMoving = false;
+            this.state = 'IDLE';
+            this._jitterFreezeTimer = 15; // 冻结15秒（真实时间）
+            this._jitterSamples = []; // 清空采样历史
+
+            // 清除可能导致循环的行动状态
+            if (this._actionOverride) {
+                this._actionOverride = false;
+                this._actionTarget = null;
+                this._currentAction = null;
+            }
+            this._enterWalkTarget = null;
+            this._pendingEnterScene = null;
+            this._pendingEnterKey = null;
+            this.scheduleReached = true; // 标记为已到达，防止日程系统立刻重新导航
+
+            // 给一个合理的冷却，防止解冻后立刻又被分配行动
+            if (this._actionDecisionCooldown !== undefined) {
+                this._actionDecisionCooldown = Math.max(this._actionDecisionCooldown, 20);
+            }
+
+            // 在游戏事件中也显示（方便玩家观察）
+            if (game && game.addEvent) {
+                game.addEvent(`⚠️ ${this.name} 行为异常（来回跑），已自动冻结`);
+            }
+        }
     }
 
     // ---- 天气影响日程 ----
     // 户外目标集合
     static get OUTDOOR_TARGETS() {
-        return new Set(['furnace_plaza', 'lumber_yard', 'ruins', 'north_gate', 'south_gate']);
+        // 【Bug修复v4.4.3】加入户外资源采集区，之前缺失导致-30°C大雪天NPC照常去冰湖/伐木场
+        return new Set([
+            'furnace_plaza', 'lumber_yard', 'ruins', 'north_gate', 'south_gate',
+            'frozen_lake', 'lumber_camp', 'ruins_site', 'ore_pile'  // 户外资源采集区
+        ]);
     }
     // 雨天室内替代目标池（随机选一个）
     static get RAIN_INDOOR_ALTERNATIVES() {
@@ -1151,9 +1687,15 @@ this.affinity = { qing_xuan: 72 };
 
     _enterIndoor(targetScene, game) {
         game = game || this.game;
-        // 【调试】追踪是谁调用了 _enterIndoor
+        // 【v4.5诊断】记录进门原因到aiModeLogger
         const _stack = new Error().stack;
-        console.log(`[_enterIndoor追踪] ${this.name} → ${targetScene}, 当前场景=${this.currentScene}, hungerOverride=${this._hungerOverride}, taskOverride=${this._taskOverride?.isActive}, walkingToDoor=${this._walkingToDoor}\n调用栈: ${_stack.split('\n').slice(1,4).join(' <- ')}`);
+        const _callerLine = _stack.split('\n').slice(2,4).map(s => s.trim().replace(/^at /, '')).join(' ← ');
+        const _reason = this._hungerOverride ? '饥饿覆盖' : (this._taskOverride?.isActive ? `任务${this._taskOverride.taskId}` : (this._stateOverride || '日程导航'));
+        console.log(`[进门追踪] ${this.name} → ${targetScene}, 当前=${this.currentScene}, 原因=${_reason}, caller=${_callerLine}`);
+        if (game && game.aiModeLogger) {
+            const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+            game.aiModeLogger.log('DOOR', `${this.name} 进门→${targetScene} | 从=${this.currentScene} | 原因=${_reason} | ${snap} | caller=${_callerLine}`);
+        }
         // 选择座位
         const insideKey = targetScene + '_inside';
         let insideLoc = GST.SCHEDULE_LOCATIONS[insideKey];
@@ -1213,29 +1755,27 @@ this.affinity = { qing_xuan: 72 };
     /** 出门过渡：先走到室内门口，到达后再传送到村庄 */
 
     _walkToDoorAndExit(game, onExitCallback) {
-        // 【调试】追踪出门调用
+        // 【v4.5诊断】记录出门原因到aiModeLogger
         const _stack2 = new Error().stack;
-        console.log(`[_walkToDoorAndExit追踪] ${this.name} 当前场景=${this.currentScene}, hungerOverride=${this._hungerOverride}, taskOverride=${this._taskOverride?.isActive}\n调用栈: ${_stack2.split('\n').slice(1,4).join(' <- ')}`);
+        const _callerLine2 = _stack2.split('\n').slice(2,4).map(s => s.trim().replace(/^at /, '')).join(' ← ');
+        const _reason2 = this._hungerOverride ? '饥饿覆盖' : (this._taskOverride?.isActive ? `任务${this._taskOverride.taskId}` : (this._stateOverride || (this._priorityOverride || '日程导航')));
+        console.log(`[出门追踪] ${this.name} 当前场景=${this.currentScene}, 原因=${_reason2}, caller=${_callerLine2}`);
+        if (game && game.aiModeLogger) {
+            const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+            game.aiModeLogger.log('DOOR', `${this.name} 出门←${this.currentScene} | 原因=${_reason2} | ${snap} | caller=${_callerLine2}`);
+        }
         if (this.currentScene === 'village') {
             // 已经在村庄了，直接执行回调
             if (onExitCallback) onExitCallback();
             return;
         }
 
-        // 【天气保护】极端天气禁止出门
-        // 【修复】P0紧急状态（健康危急/体力不支）无视天气限制，必须回家
+        // 【天气保护】用于低温警告
         const ws = game && game.weatherSystem;
-        const isP0Urgent = this._behaviorPriority === 'P0';
-        if (ws && !ws.canGoOutside() && !isP0Urgent) {
-            console.warn(`[NPC-${this.name}] [天气保护] 因极端天气取消出门`);
-            this._logDebug('schedule', `[天气保护] ${this.name} 因极端天气取消出门`);
-            // 不执行出门，也不执行回调
-            return;
-        }
-
-        // 【户外冷却期保护】P0体温避险清除后短暂阻止出门，防止刚恢复就又被冻
-        if (this._outdoorCooldown > 0 && !isP0Urgent) {
-            console.log(`[户外冷却] ${this.name} 户外冷却期剩余${this._outdoorCooldown.toFixed(1)}s，阻止出门`);
+        // 【v4.7统一】户外安全门控：统一检查属性+天气+冷却
+        if (!this.canSafelyGoOutdoor(game)) {
+            console.warn(`[NPC-${this.name}] [户外安全门控] 属性/天气不满足安全条件，取消出门`);
+            this._logDebug('schedule', `[户外安全门控] ${this.name} 属性/天气不满足安全条件，取消出门`);
             return;
         }
 
@@ -1436,6 +1976,8 @@ this.affinity = { qing_xuan: 72 };
     }
 
     _pathTo(gx, gy, game) {
+        // 【v4.16】抖动冻结期间不分配新路径
+        if (this._jitterFreezeTimer > 0) return;
         const map = game.maps[this.currentScene];
         if (!map) return;
         const pos = this.getGridPos();
@@ -1503,6 +2045,11 @@ this.affinity = { qing_xuan: 72 };
         if (this.state === 'CHATTING') {
             return;
         }
+        // 【v4.16】抖动冻结期间暂停移动
+        if (this._jitterFreezeTimer > 0) {
+            this.isMoving = false;
+            return;
+        }
         if (this.pathIndex >= this.currentPath.length) {
             this.currentPath = [];
             this.isMoving = false;
@@ -1555,9 +2102,12 @@ this.affinity = { qing_xuan: 72 };
         this.y += ny * step;
         this.isMoving = true;
 
+        const _speedMultPath = (game && game.speedOptions) ? game.speedOptions[game.speedIdx] : 1;
+        const _realDtPath = _speedMultPath > 0 ? dt / _speedMultPath : dt;
+
         // 正常移动中，逐渐衰减碰撞累积计时器
         if (this.collisionStallTimer > 0) {
-            this.collisionStallTimer = Math.max(0, this.collisionStallTimer - dt * 0.5);
+            this.collisionStallTimer = Math.max(0, this.collisionStallTimer - _realDtPath * 0.5);
         }
 
         // 面向方向
@@ -1570,7 +2120,7 @@ this.affinity = { qing_xuan: 72 };
         // 卡住检测（缩短到1.5秒，碰撞推挤后更快恢复）
         // 如果被其他NPC持续碰撞阻挡（collisionStallTimer高），缩短检测阈值到0.8秒
         const stuckThreshold = this.collisionStallTimer > 0.5 ? 0.8 : 1.5;
-        this.stuckTimer += dt;
+        this.stuckTimer += _realDtPath;
         if (this.stuckTimer > stuckThreshold) {
             this.stuckTimer = 0;
             // 检查是否被碰撞推挤导致偏离路径
@@ -1674,6 +2224,9 @@ this.affinity = { qing_xuan: 72 };
             _forcedSleepTimer: this._forcedSleepTimer,
             // 任务驱动覆盖系统
             _taskOverride: { ...this._taskOverride },
+            _pendingIntent: this._pendingIntent ? { ...this._pendingIntent, action: this._pendingIntent.action ? { ...this._pendingIntent.action } : null } : null,
+            _currentIntent: this._currentIntent ? { ...this._currentIntent, action: this._currentIntent.action ? { ...this._currentIntent.action } : null } : null,
+            _lastIntentArbitration: this._lastIntentArbitration ? { ...this._lastIntentArbitration } : null,
             _behaviorPriority: this._behaviorPriority,
             // 统一行为锁系统
             _currentBehaviorLock: this._currentBehaviorLock ? { ...this._currentBehaviorLock } : null,
@@ -1719,13 +2272,16 @@ this.affinity = { qing_xuan: 72 };
         if (data._taskOverride) {
             this._taskOverride = { ...this._taskOverride, ...data._taskOverride };
         }
+        this._pendingIntent = data._pendingIntent ? { ...data._pendingIntent, action: data._pendingIntent.action ? { ...data._pendingIntent.action } : null } : null;
+        this._currentIntent = data._currentIntent ? { ...data._currentIntent, action: data._currentIntent.action ? { ...data._currentIntent.action } : null } : null;
+        this._lastIntentArbitration = data._lastIntentArbitration ? { ...data._lastIntentArbitration } : null;
         if (data._behaviorPriority) this._behaviorPriority = data._behaviorPriority;
         // 统一行为锁系统恢复
         if (data._currentBehaviorLock) {
             // 格式校验：确保有必要字段
             if (data._currentBehaviorLock.type && typeof data._currentBehaviorLock.priority === 'number' && typeof data._currentBehaviorLock.startTime === 'number') {
-                // 安全网检查：如果锁持续时间超过120秒，自动释放
-                const lockAge = this.game ? (this.game.gameTime - data._currentBehaviorLock.startTime) : 0;
+                // 安全网检查：如果锁持续时间超过120秒真实时间，自动释放
+                const lockAge = (Date.now() - data._currentBehaviorLock.startTime) / 1000;
                 if (lockAge > 120) {
                     console.warn(`[反序列化] ${this.name} 行为锁 ${data._currentBehaviorLock.type} 已过期(${lockAge.toFixed(0)}秒)，自动释放`);
                     this._currentBehaviorLock = null;

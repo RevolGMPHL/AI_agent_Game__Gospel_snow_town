@@ -12,6 +12,28 @@
         // 新系统下直接返回宿舍内部位置
         return this.homeName + '_inside';
     }
+
+    /**
+     * 统一户外安全门控 — 所有出门路径必须经过此检查
+     * 基于实际属性值判断，而非定时器/P0类型枚举
+     * 阈值设计：P0触发阈值 < P0清除阈值 < 安全出门阈值（三级缓冲）
+     */
+    proto.canSafelyGoOutdoor = function(game) {
+        // P0紧急状态自身的导航不受限（如health_critical需出门去医疗站）
+        if (this._behaviorPriority === 'P0') return true;
+        // 属性安全阈值（均高于P0清除阈值，形成缓冲带）
+        if (this.bodyTemp !== undefined && this.bodyTemp < 36.5) return false; // P0触发<35, 清除≥35.5
+        if (this.sanity !== undefined && this.sanity < 55) return false;       // P0触发<40, 清除≥50
+        if (this.stamina !== undefined && this.stamina < 45) return false;     // P0触发<25, 清除≥40
+        if (this.health < 40) return false;                                    // P0触发<30动态, 清除≥30
+        // 天气检查
+        const ws = game && game.weatherSystem;
+        if (ws && !ws.canGoOutside()) return false;
+        // 户外冷却兜底
+        if (this._outdoorCooldown > 0) return false;
+        return true;
+    };
+
     /** 场景名 → 中文标签 */;
 
     proto._getWeatherAdjustedEntry = function(entry, game) {
@@ -39,6 +61,44 @@
             desc: alt.desc,
             _rainAdjusted: true, // 标记为雨天替换
         };
+    }
+
+    /**
+     * 根据精神状态调整日程
+     * 当NPC精神状态较差时，将户外日程替换为室内日程
+     * 【v4.2修复】让苏岩等NPC能自主意识到精神状态差，避免去户外工作
+     */
+    proto._getSanityAdjustedEntry = function(entry, game) {
+        if (!entry) return entry;
+        if (!NPC.OUTDOOR_TARGETS.has(entry.target)) return entry;
+
+        // 精神状态检查：San<40时不应去户外工作
+        if (this.sanity === undefined || this.sanity >= 40) return entry;
+
+        // 精神状态差 + 户外目标 → 替换为室内休息
+        const sanityDesc = this.sanity < 25 
+            ? `精神濒临崩溃(San:${Math.round(this.sanity)})，留在室内休养`
+            : `精神状态不佳(San:${Math.round(this.sanity)})，留在室内休息`;
+        
+        return {
+            ...entry,
+            target: this.homeName + '_door',
+            desc: sanityDesc,
+            _sanityAdjusted: true, // 标记为精神状态替换
+        };
+    }
+
+    /**
+     * 组合调整函数：依次应用天气调整和精神状态调整
+     * 【v4.2新增】统一入口，确保所有日程都经过完整的调整流程
+     */
+    proto._getAdjustedEntry = function(entry, game) {
+        if (!entry) return entry;
+        // 先应用天气调整
+        let adjusted = this._getWeatherAdjustedEntry(entry, game);
+        // 再应用精神状态调整（如果天气没有替换，或者替换后仍是户外）
+        adjusted = this._getSanityAdjustedEntry(adjusted, game);
+        return adjusted;
     }
 
     // ---- 睡眠状态管理 ----;
@@ -74,6 +134,8 @@
     /** 获取NPC自己的床位位置key（宿舍内部） */;
 
     proto._navigateToScheduleTarget = function(targetKey, game) {
+        // 【v4.16】抖动冻结期间不接受导航指令
+        if (this._jitterFreezeTimer > 0) return;
         // 【进屋保护期】NPC刚进入室内时，短暂冻结跨场景导航，防止闪现
         // 【修复】P0紧急状态（健康危急/体力不支）无视保护期，必须立即回家
         const isP0Nav = this._behaviorPriority === 'P0';
@@ -146,14 +208,16 @@
                 }
             } else {
                 // 在其他室内 → 先走到室内门口再出门到村庄
-                // 【天气保护】跨场景导航需经过室外时，检查天气是否允许外出
-                // 【修复】P0紧急状态（健康危急/体力不支）无视天气限制，人都要死了必须回家
-                const wsNav = game && game.weatherSystem;
-                const isP0Emergency = this._behaviorPriority === 'P0';
-                if (wsNav && !wsNav.canGoOutside() && !isP0Emergency) {
-                    console.warn(`[NPC-${this.name}] [天气保护] 跨场景导航需经过室外，但天气禁止外出，NPC留在室内待命`);
+                // 【v4.7统一】户外安全门控：统一检查属性+天气+冷却，替代之前单独的天气检查
+                if (!this.canSafelyGoOutdoor(game)) {
+                    console.warn(`[NPC-${this.name}] [户外安全门控] 跨场景导航需经过室外，但属性/天气不满足安全条件，NPC留在室内待命`);
                     this.scheduleReached = true;
                     return;
+                }
+                // 【v4.5诊断】日程跨场景导航需要出门
+                if (this.game && this.game.aiModeLogger) {
+                    const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+                    this.game.aiModeLogger.log('DOOR', `${this.name} [日程跨场景]从${this.currentScene}出门→目标${targetKey} | 饥饿覆盖=${this._hungerOverride} | 状态覆盖=${this._stateOverride || '无'} | ${snap}`);
                 }
                 this._walkToDoorAndExit(game, null);
                 // 出门后下一帧日程系统会重新触发导航
@@ -301,6 +365,9 @@
     // ---- 日程系统 ----;
 
     proto._updateSchedule = function(dt, game) {
+        const speedMult = (game && game.speedOptions) ? game.speedOptions[game.speedIdx] : 1;
+        const realDt = speedMult > 0 ? dt / speedMult : dt;
+
         // ============ 三层行为优先级系统 ============
         // P0: 生存紧急（体温<35回暖炉、第4天室内锁定、健康<20去暖炉、体力<20暂停任务）
         // P1: 任务驱动（_taskOverride激活时覆盖日程、紧急资源任务、LLM urgent行动）
@@ -328,7 +395,7 @@
             }
             // P0同时暂停taskOverride中的户外任务
             if (this._taskOverride.isActive) {
-                this._taskOverride.isActive = false;
+                this._pauseTaskOverride('day4_lockdown', 'priority');
                 this._logDebug('schedule', `[P0] 第4天暂停任务覆盖`);
             }
             return;
@@ -391,7 +458,7 @@
             }
             // P0同时暂停taskOverride
             if (this._taskOverride.isActive) {
-                this._taskOverride.isActive = false;
+                this._pauseTaskOverride('hypothermia', 'priority');
                 this._logDebug('schedule', `[P0] 低体温暂停任务覆盖`);
             }
             return;
@@ -400,7 +467,9 @@
         // P0-3: 健康危急 — 使用动态阈值（行为锁下收紧）
         // 【行为锁优化】正在吃饭/睡觉/治疗时，阈值从<20收紧到<10
         const p0t = this._getP0Thresholds();
-        if (this.health < p0t.healthThreshold && this.currentScene !== 'medical') {
+        // 【v4.5修复】stateOverride=sick时跳过P0-3：NPC已在前往医疗站途中，
+        // P0-3会把目标改成宿舍，与stateOverride冲突导致进门出门死循环
+        if (this.health < p0t.healthThreshold && this.currentScene !== 'medical' && this._stateOverride !== 'sick') {
             // 【行为锁】如果当前行为即将完成(5秒内)，等待完成后再触发P0
             if (this.isEating && this.eatingTimer > 0 && this.eatingTimer < 5) {
                 this._logDebug('schedule', `[P0] 健康${Math.round(this.health)}但吃饭即将完成(${this.eatingTimer.toFixed(1)}s)，等待完成`);
@@ -431,7 +500,7 @@
             }
             // P0同时暂停taskOverride
             if (this._taskOverride.isActive) {
-                this._taskOverride.isActive = false;
+                this._pauseTaskOverride('health_critical', 'priority');
                 this._logDebug('schedule', `[P0] 健康危急暂停任务覆盖`);
             }
             return;
@@ -463,7 +532,7 @@
                 return;
             }
             this._behaviorPriority = 'P0';
-            this._taskOverride.isActive = false;
+            this._pauseTaskOverride('stamina_critical', 'priority');
             // 【修复】体力不支导航到宿舍而非户外暖炉广场，避免NPC站在户外无法恢复
             const staminaTarget = this.homeName + '_door';
             if (this._priorityOverride !== 'stamina_critical') {
@@ -511,7 +580,7 @@
         // P0-6: 第2天户外任务2小时轮换机制
         if (currentDay === 2 && this.currentScene === 'village') {
             if (!this._outdoorTimer) this._outdoorTimer = 0;
-            this._outdoorTimer += dt;
+            this._outdoorTimer += realDt;
             if (this._outdoorTimer > 120) { // 2分钟真实时间≈游戏2小时
                 this._behaviorPriority = 'P0';
                 if (this._priorityOverride !== 'day2_return') {
@@ -527,6 +596,40 @@
             this._outdoorTimer = 0;
         }
 
+        // P0-7: 精神状态危急 — San<40时停止户外工作，返回室内休息
+        // 【v4.2修复】苏岩等NPC在精神状态差时应自主停止户外工作，避免精神崩溃
+        // 【行为锁】正在吃饭/睡觉/治疗时不打断
+        // 【v4.5修复】stateOverride=mental/sick时跳过P0-7：NPC已在前往医疗站途中，
+        // P0-7会把目标改成宿舍，与stateOverride冲突导致进门出门死循环
+        const isSanityCritical = this.sanity !== undefined && this.sanity < 40;
+        const isOutdoorScene = this.currentScene === 'village';
+        const canInterruptSanity = !this.isEating && !this.isSleeping && !this._isBeingTreated;
+        const isAlreadySeekingHelp = this._stateOverride === 'mental' || this._stateOverride === 'sick';
+        if (isSanityCritical && isOutdoorScene && canInterruptSanity && !isAlreadySeekingHelp) {
+            this._behaviorPriority = 'P0';
+            if (this._priorityOverride !== 'sanity_critical') {
+                this._priorityOverride = 'sanity_critical';
+                this.stateDesc = `精神状态很差(San:${Math.round(this.sanity)})，必须休息`;
+                this._logDebug('schedule', `[P0] 精神危急 San=${Math.round(this.sanity)}，强制返回室内休息`);
+                // AI模式日志：P0精神危急
+                if (this.game && this.game.aiModeLogger) {
+                    const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+                    this.game.aiModeLogger.log('EMERGENCY', `${this.name} [P0]精神危急San=${Math.round(this.sanity)},强制返回室内 | ${snap}`);
+                }
+                // 返回宿舍休息（宿舍可以恢复San值）
+                this._navigateToScheduleTarget(this.homeName + '_door', game);
+            } else if (!this.isMoving && this.currentPath.length === 0) {
+                // 【防卡住兜底】已处于sanity_critical但NPC不在移动，重新导航
+                this._navigateToScheduleTarget(this.homeName + '_door', game);
+            }
+            // P0同时暂停taskOverride
+            if (this._taskOverride.isActive) {
+                this._pauseTaskOverride('sanity_critical', 'priority');
+                this._logDebug('schedule', `[P0] 精神危急暂停任务覆盖`);
+            }
+            return;
+        }
+
         // P0优先级覆盖清除检测
         if (this._priorityOverride) {
             const canClear = (
@@ -534,6 +637,7 @@
                 (this._priorityOverride === 'medical_urgent' && this.health >= 40) ||
                 (this._priorityOverride === 'health_critical' && this.health >= 30) ||
                 (this._priorityOverride === 'stamina_critical' && this.stamina >= 40) ||
+                (this._priorityOverride === 'sanity_critical' && this.sanity >= 50) ||
                 (this._priorityOverride === 'day2_return' && this.currentScene !== 'village') ||
                 (this._priorityOverride === 'day4_lockdown' && this.currentScene !== 'village')
             );
@@ -541,10 +645,8 @@
                 const clearedType = this._priorityOverride;
                 this._priorityOverride = null;
                 this._logDebug('schedule', `[P0] 优先级覆盖(${clearedType})已清除，恢复正常行为`);
-                // 【v3.0修复】P0 hypothermia 清除后设置户外冷却保护期，防止日程立即导航到户外又触发P0
-                if (clearedType === 'hypothermia') {
-                    this._outdoorCooldown = 30; // 30秒真实时间内不允许导航到户外
-                }
+                // 【v4.7统一】P0清除后设置兜底冷却（30s），主力判断由canSafelyGoOutdoor属性检查承担
+                this._outdoorCooldown = 30;
                 // 【行为锁】P0恢复后检查是否仍在就寝时段，如果是则导航回宿舍继续睡觉
                 const curHour = game.getHour();
                 if (this._isBedtime(curHour) && !this.isSleeping) {
@@ -553,13 +655,21 @@
                     return;
                 }
                 // P0恢复后自动重启被暂停的任务
+                // 【v4.7统一】通过canSafelyGoOutdoor判断是否安全出门，不再枚举P0类型
                 if (this._taskOverride.targetLocation && this._taskOverride.taskId && !this._taskOverride.isActive) {
-                    this._taskOverride.isActive = true;
-                    this._taskOverrideReached = false;
-                    this._taskOverrideStuckTimer = 0;
-                    this._taskOverrideTravelTimer = 0;
-                    this._logDebug('schedule', `[P0恢复] 自动重启被暂停的任务: ${this._taskOverride.taskId} → ${this._taskOverride.targetLocation}`);
-                    this._navigateToScheduleTarget(this._taskOverride.targetLocation, game);
+                    const taskLoc = GST.SCHEDULE_LOCATIONS[this._taskOverride.targetLocation];
+                    const isOutdoorTask = taskLoc && taskLoc.scene === 'village';
+                    if (isOutdoorTask && !this.canSafelyGoOutdoor(game)) {
+                        // 属性未达安全阈值，取消户外任务，等待下次会议重新分配
+                        this._logDebug('schedule', `[P0恢复] 属性未达安全阈值，取消户外任务: ${this._taskOverride.taskId} → ${this._taskOverride.targetLocation}`);
+                        if (this.game && this.game.aiModeLogger) {
+                            this.game.aiModeLogger.log('TASK', `${this.name} [P0恢复]取消户外任务${this._taskOverride.taskId}→${this._taskOverride.targetLocation}（属性未达安全阈值）`);
+                        }
+                        this.deactivateTaskOverride();
+                    } else {
+                        this._resumeTaskOverride(game, 'p0_recovered', 'priority');
+                        this._logDebug('schedule', `[P0恢复] 自动重启被暂停的任务: ${this._taskOverride.taskId} → ${this._taskOverride.targetLocation}`);
+                    }
                 }
             } else {
                 return; // P0行为未完成，继续执行
@@ -570,9 +680,10 @@
         // 当_taskOverride激活时，跳过P2日程，导航到任务目标位置
 
         // 【一致性检查】饥饿覆盖和任务覆盖不能同时存在
+        // 【v4.17修复】改为暂停而非完全取消，避免_checkResourceUrgency反复重分配导致刷屏
         if (this._hungerOverride && this._taskOverride && this._taskOverride.isActive) {
-            console.log(`[一致性] ${this.name} 饥饿覆盖与任务覆盖同时存在，强制取消任务覆盖`);
-            this.deactivateTaskOverride();
+            console.log(`[一致性] ${this.name} 饥饿覆盖与任务覆盖同时存在，暂停任务覆盖`);
+            this._pauseTaskOverride('hunger_override', 'hunger');
         }
 
         // P1-1: 任务覆盖激活检测
@@ -599,7 +710,8 @@
         }
 
         // ========== P2: 日程默认层 ==========
-        this._behaviorPriority = 'P2';
+        const scheduleControl = this._getScheduleControl();
+        this._behaviorPriority = scheduleControl.priority;
 
         // 【修复】睡眠全局保护：NPC在睡觉中时跳过P2层几乎所有逻辑
         // 仅在真正致命情况（体温<33°C、健康<10）才允许P0穿透（已在上面P0层处理）
@@ -612,14 +724,6 @@
 
         // 【饥饿系统】如果正在吃饭，完全跳过日程
         if (this.isEating) return;
-
-        // 【状态覆盖系统】状态覆盖期间完全跳过正常日程
-        if (this._stateOverride || this._isBeingTreated) return;
-
-        // 【LLM行动决策系统】行动覆盖期间完全跳过正常日程
-        if (this._actionOverride && this._actionTarget) return;
-        // 【LLM行动决策系统】同伴跟随期间完全跳过正常日程
-        if (this._isCompanion && this._companionDestination) return;
 
         // 【饥饿系统】饥饿覆盖状态下，完全跳过正常日程调度
         // 【兜底】如果_hungerOverride=true但_hungerTarget为空（说明_triggerHungerBehavior被出门保护/P0保护拦截了），
@@ -650,6 +754,17 @@
             return; // 饥饿覆盖期间完全不执行正常日程
         }
 
+        // 统一仲裁：只要当前控制方不是日程，就由高优先级系统继续接管
+        if (scheduleControl.blocksSchedule) {
+            return;
+        }
+
+        // 【v4.14 核心改动】去除白天日常日程，全权交给LLM行动决策
+        // P2日程只在以下时段生效：
+        // 1. 睡觉时段（22:00~6:00）：NPC必须回宿舍睡觉
+        // 2. 白天时段（6:00~22:00）：不再由日程驱动，交给LLM自主决策
+        const isBedtime = this._isBedtime(hour);
+
         // hour 已在函数开头声明
         const sched = this.scheduleTemplate;
         let targetIdx = -1;
@@ -664,13 +779,31 @@
             }
         }
 
+        // 判断当前日程是否为睡觉日程
+        const currentEntry = targetIdx >= 0 ? sched[targetIdx] : null;
+        const isSleepSchedule = currentEntry && (
+            (currentEntry.target && currentEntry.target.includes('_bed_')) ||
+            (currentEntry.desc && (currentEntry.desc.includes('睡觉') || currentEntry.desc.includes('休息睡觉')))
+        );
+
+        // 【v4.14】白天非睡觉日程 → 跳过P2日程导航，交给LLM自主决策
+        if (!isSleepSchedule && !isBedtime) {
+            // 更新日程索引（用于LLM prompt中的参考信息），但不导航
+            if (targetIdx !== this.currentScheduleIdx) {
+                this.currentScheduleIdx = targetIdx;
+            }
+            // 白天不执行日程导航，直接返回
+            return;
+        }
+
         // 【天气影响】如果正在下雨，NPC在户外（village场景），且当前日程原本是户外目标，
         // 强制触发重新导航到室内（即使日程没有切换）
-        if (targetIdx >= 0 && game.isRaining() && this.currentScene === 'village' && this.scheduleReached) {
+        // 【统一仲裁】日程是否允许改写目标，统一由 scheduleControl 决定
+        if (targetIdx >= 0 && game.isRaining() && this.currentScene === 'village' && this.scheduleReached && scheduleControl.canRetargetFromSchedule) {
             const rawTarget = sched[targetIdx].target;
             if (NPC.OUTDOOR_TARGETS.has(rawTarget)) {
                 // 原始目标是户外，但下雨了，需要重新导航到室内替代目标
-                const adjusted = this._getWeatherAdjustedEntry(sched[targetIdx], game);
+                const adjusted = this._getAdjustedEntry(sched[targetIdx], game);
                 this.stateDesc = adjusted.desc;
                 this.scheduleReached = false;
                 this._navigateToScheduleTarget(adjusted.target, game);
@@ -679,12 +812,12 @@
 
         if (targetIdx !== this.currentScheduleIdx) {
             this.currentScheduleIdx = targetIdx;
-            // 【关键修复】行动覆盖期间，日程切换只更新索引，不覆盖状态和导航
+            // 【关键修复】高优先级控制期间，日程切换只更新索引，不覆盖状态和导航
             // 否则NPC决定去做B事，日程切换会覆盖stateDesc并重置scheduleReached，
             // 导致NPC走一半转头去执行旧日程
-            if (this._actionOverride) {
-                // 行动覆盖中，仅记录日程变化，不干预当前行为
-                this._logDebug('schedule', `日程切换到#${targetIdx}但行动覆盖中，不干预`);
+            if (!scheduleControl.canRetargetFromSchedule) {
+                // 高优先级控制中，仅记录日程变化，不干预当前行为
+                this._logDebug('schedule', `日程切换到#${targetIdx}但当前由${scheduleControl.owner}接管(${scheduleControl.reason})，不干预`);
             } else if (this._chatWalkTarget) {
                 // 【修复】社交走路中，仅记录日程变化，不干预（防止日程打断走向聊天目标的路径）
                 this._logDebug('schedule', `日程切换到#${targetIdx}但正在走向聊天目标，不干预`);
@@ -705,11 +838,11 @@
                     // 新日程不是睡觉日程（如6点以后的起床日程），正常处理
                     this.scheduleReached = false;
                     this._enterWalkTarget = null;
-                    if (targetIdx >= 0) {
-                        const rawS = sched[targetIdx];
-                        const s = this._getWeatherAdjustedEntry(rawS, game);
-                        this.stateDesc = s.desc;
-                        this._logDebug('schedule', `日程切换→#${targetIdx}:${s.desc} 目标:${s.target} (睡眠将由_updateSleepState结束)`);
+                if (targetIdx >= 0) {
+                    const rawS = sched[targetIdx];
+                    const s = this._getAdjustedEntry(rawS, game);
+                    this.stateDesc = s.desc;
+                    this._logDebug('schedule', `日程切换→#${targetIdx}:${s.desc} 目标:${s.target} (睡眠将由_updateSleepState结束)`);
                     }
                 }
             } else {
@@ -717,7 +850,7 @@
                 this._enterWalkTarget = null; // 清空旧的室内走路目标
                 if (targetIdx >= 0) {
                     const rawS = sched[targetIdx];
-                    const s = this._getWeatherAdjustedEntry(rawS, game);
+                    const s = this._getAdjustedEntry(rawS, game);
                     this.stateDesc = s.desc;
                     // 【修复】CHATTING、饥饿覆盖状态下不触发导航
                     if (this.state !== 'CHATTING' && !this._hungerOverride) {
@@ -730,8 +863,9 @@
 
         // 【任务4】日程导航超时兜底：如果导航超过30秒仍未到达，强制传送
         // 【修复】持有行为锁/吃饭/休息缓冲/前往吃饭途中时跳过超时传送
+        // 【决策优先】行动覆盖激活时，P2日程不得再执行自己的超时兜底
         if (targetIdx >= 0 && !this.scheduleReached && this._scheduleNavTarget) {
-            this._scheduleNavTimer += dt;
+            this._scheduleNavTimer += realDt;
             // 行为锁保护：持有行为锁时重置计时器，不触发超时传送
             if (this._currentBehaviorLock) {
                 this._scheduleNavTimer = 0;
@@ -744,9 +878,13 @@
             if (this._hungerOverride && this.isMoving) {
                 this._scheduleNavTimer = 0;
             }
+            // 高优先级控制期间，冻结P2自己的超时计时，避免日程反向接管
+            if (!scheduleControl.canRecoverTimeout) {
+                this._scheduleNavTimer = 0;
+            }
             if (this._scheduleNavTimer > 30) {
                 const rawST = sched[targetIdx];
-                const sT = this._getWeatherAdjustedEntry(rawST, game);
+                const sT = this._getAdjustedEntry(rawST, game);
                 const locT = GST.SCHEDULE_LOCATIONS[sT.target];
                 if (locT) {
                     // 【天气保护】超时传送目标为室外且天气禁止外出时，取消传送
@@ -776,9 +914,9 @@
         const _lockType = this._getBehaviorLockType();
         if (_lockType === 'resting' || _lockType === 'sleeping' || _lockType === 'eating') {
             // 行为锁保护中，跳过P2日程导航
-        } else if (targetIdx >= 0 && !this.scheduleReached && !this.isMoving && this.currentPath.length === 0 && !this.isSleeping && this.state !== 'CHATTING' && !this._hungerOverride && !this._actionOverride && !this._chatWalkTarget) {
+        } else if (targetIdx >= 0 && !this.scheduleReached && !this.isMoving && this.currentPath.length === 0 && !this.isSleeping && this.state !== 'CHATTING' && !this._hungerOverride && scheduleControl.canRetryScheduleNavigation && !this._chatWalkTarget && !this._walkingToDoor) {
             const rawS = sched[targetIdx];
-            const s = this._getWeatherAdjustedEntry(rawS, game);
+            const s = this._getAdjustedEntry(rawS, game);
             const loc = GST.SCHEDULE_LOCATIONS[s.target];
             const isDoorTarget = s.target.endsWith('_door');
             const doorToScene = {
@@ -786,6 +924,24 @@
                 dorm_a_door: 'dorm_a', dorm_b_door: 'dorm_b',
                 kitchen_door: 'kitchen', workshop_door: 'workshop',
             };
+
+            // 【进屋保护期检查】进屋保护期内阻止跨场景导航，避免无限循环打印日志
+            const isP0Nav = this._behaviorPriority === 'P0';
+            if (this._indoorEntryProtection > 0 && this.currentScene !== 'village' && !isP0Nav && loc && loc.scene !== this.currentScene) {
+                return; // 直接返回，不打印日志也不执行导航
+            }
+
+            // 【v4.5诊断】P2日程导航触发时，如果目标场景和当前场景不同，记录到日志
+            if (loc && loc.scene !== this.currentScene) {
+                const targetIndoorScene = isDoorTarget ? doorToScene[s.target] : null;
+                if (!targetIndoorScene || this.currentScene !== targetIndoorScene) {
+                    console.log(`[P2日程导航] ${this.name} 场景不匹配: 当前=${this.currentScene}, 日程目标=${s.target}(场景${loc.scene}), 将触发跨场景导航`);
+                    if (this.game && this.game.aiModeLogger) {
+                        const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+                        this.game.aiModeLogger.log('DOOR', `${this.name} [P2日程恢复]需跨场景: 当前=${this.currentScene}→目标=${s.target} | schedIdx=${targetIdx} | ${snap}`);
+                    }
+                }
+            }
 
             // 【修复】如果目标是门口类（xxx_door），NPC已经进入对应室内场景
             if (isDoorTarget) {
@@ -822,10 +978,11 @@
         // 【安全网】如果日程标记为已到达，但目标是门口类（xxx_door）且NPC仍在村庄，说明进入建筑失败，先传送到室内门口再走进去
         // 【休息缓冲期】缓冲期内跳过安全网逻辑，避免把NPC传送出去
         // 【修复】饥饿覆盖/进屋保护期内跳过安全网，避免NPC刚走出门就被传送回去
+        // 【统一仲裁】高优先级控制期间，P2日程安全网不得强行进门
         if (this.scheduleReached && targetIdx >= 0 && !this.isSleeping && this.state !== 'CHATTING' && !this.isRestingCooldown
             && !this._currentBehaviorLock && !this.isEating && !this._isBeingTreated
-            && !this._hungerOverride && !this._resourceGatherOverride && this._indoorEntryProtection <= 0) {
-            const curTarget = this._getWeatherAdjustedEntry(sched[targetIdx], game).target;
+            && !this._hungerOverride && !this._resourceGatherOverride && scheduleControl.canUseDoorSafetyNet && this._indoorEntryProtection <= 0) {
+            const curTarget = this._getAdjustedEntry(sched[targetIdx], game).target;
             if (curTarget.endsWith('_door') && this.currentScene === 'village') {
                 const safetyDoorToScene = {
                     warehouse_door: 'warehouse', medical_door: 'medical',
@@ -834,6 +991,12 @@
                 };
                 const targetScene = safetyDoorToScene[curTarget];
                 if (targetScene) {
+                    // 【v4.5诊断】安全网触发进门
+                    console.warn(`[安全网进门] ${this.name} 日程目标=${curTarget}但仍在village，安全网触发进入${targetScene}`);
+                    if (this.game && this.game.aiModeLogger) {
+                        const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+                        this.game.aiModeLogger.log('DOOR', `${this.name} [安全网]进门→${targetScene} | 日程目标=${curTarget} | scheduleReached=${this.scheduleReached} | ${snap}`);
+                    }
                     this._enterIndoor(targetScene, game);
                 }
             }
@@ -843,25 +1006,29 @@
         // 【修复】CHATTING 状态下不触发环境感知，避免把正在聊天的NPC传送走
         // 【位置偏移修正】scheduleReached=true但NPC远离目标时，重新导航
         // 【休息缓冲期】缓冲期内跳过位置偏移修正，避免把NPC导航出去
+        // 【统一仲裁】高优先级控制期间，P2日程不得做偏移修正
         if (this.scheduleReached && targetIdx >= 0 && !this.isSleeping && this.state !== 'CHATTING' && !this.isMoving && this.currentPath.length === 0 && !this.isRestingCooldown
             && !this._currentBehaviorLock && !this.isEating && !this._isBeingTreated
-            && !this._hungerOverride && !this._stateOverride && !this._enterWalkTarget) {
+            && !this._hungerOverride && !this._stateOverride && scheduleControl.canCorrectArrivalOffset && !this._enterWalkTarget) {
             const rawSCheck = sched[targetIdx];
-            const sCheck = this._getWeatherAdjustedEntry(rawSCheck, game);
+            const sCheck = this._getAdjustedEntry(rawSCheck, game);
             const locCheck = GST.SCHEDULE_LOCATIONS[sCheck.target];
             if (locCheck && locCheck.scene === this.currentScene) {
                 const posCheck = this.getGridPos();
                 const distCheck = Math.abs(posCheck.x - locCheck.x) + Math.abs(posCheck.y - locCheck.y);
                 if (distCheck > 6) {
                     console.warn(`[NPC-${this.name}] [位置偏移修正] scheduleReached=true但距目标${sCheck.target}距离=${distCheck}格(>6)，重新导航`);
+                    if (game && game.addEvent) {
+                        game.addEvent(`📍 ${this.name} 偏离目标${sCheck.target}太远(${distCheck}格)，重新导航`);
+                    }
                     this.scheduleReached = false;
                     this._navigateToScheduleTarget(sCheck.target, game);
                     return;
                 }
             }
         }
-        if (this.scheduleReached && targetIdx >= 0 && !this.isSleeping && this.state !== 'CHATTING') {
-            this._postArrivalAwareness(game, this._getWeatherAdjustedEntry(sched[targetIdx], game));
+        if (this.scheduleReached && targetIdx >= 0 && !this.isSleeping && this.state !== 'CHATTING' && scheduleControl.canRunPostArrivalBehavior) {
+            this._postArrivalAwareness(game, this._getAdjustedEntry(sched[targetIdx], game));
 
             // 店主无客外出招揽机制：当在自己店里且连续无客超过30分钟，出门招揽
             if (this.workplaceName === this.currentScene && this.shopAloneMinutes > 30) {
@@ -1088,6 +1255,44 @@
             if (game.addEvent) {
                 game.addEvent(`🌅 ${this.name} ${this.stateDesc}`);
             }
+
+            // 【睡醒恢复决策任务】如果 council 分配的任务还在且未过期，醒来后重新激活
+            if (this._councilTask && this._councilTaskTime) {
+                const EXPIRY_MS = 10 * 60 * 1000;
+                if (Date.now() - this._councilTaskTime < EXPIRY_MS && this._councilStateDesc) {
+                    // 从 council-system 的 TASK_ACTION_MAP 重新映射目标
+                    const taskLower = this._councilTask.toLowerCase();
+                    const TARGET_MAP = [
+                        { kw: ['砍柴','伐木','木柴'], target: 'lumber_yard', res: 'woodFuel' },
+                        { kw: ['捕鱼','采集食物','食物'], target: 'frozen_lake', res: 'food' },
+                        { kw: ['采矿','矿'], target: 'ore_pile', res: 'power' },
+                        { kw: ['探索','废墟'], target: 'ruins_site', res: null },
+                        { kw: ['人工发电','手摇发电','发电','维修发电','电力','维护电力'], target: 'workshop_door', res: 'power' },
+                        { kw: ['建造发电机','自动发电'], target: 'workshop_door', res: null },
+                        { kw: ['建造伐木机','自动伐木'], target: 'workshop_door', res: null },
+                        // 暖炉维护已移除（v4.13）
+                        { kw: ['做饭','烹饪','炊事'], target: 'kitchen_door', res: null },
+                        { kw: ['治疗','医疗','急救'], target: 'medical_door', res: null },
+                        { kw: ['盘点','仓库'], target: 'warehouse_door', res: null },
+                        { kw: ['安抚','鼓舞','士气'], target: 'furnace_plaza', res: null },
+                    ];
+                    let matched = null;
+                    for (const m of TARGET_MAP) {
+                        if (m.kw.some(k => taskLower.includes(k))) { matched = m; break; }
+                    }
+                    if (matched) {
+                        this.activateTaskOverride(
+                            `council_wake_${this._councilTask}`,
+                            matched.target,
+                            'high',
+                            matched.res
+                        );
+                        this.stateDesc = this._councilStateDesc;
+                        this._actionDecisionCooldown = 0;
+                        console.log(`[Council恢复] ${this.name} 睡醒后恢复决策任务: ${this._councilTask} → ${matched.target}`);
+                    }
+                }
+            }
         }
     };
 
@@ -1112,6 +1317,16 @@
         }
         // 【状态覆盖保护】状态覆盖中跳过任务导航
         if (this._stateOverride) return;
+
+        // 【v4.7统一】户外安全门控：属性未达安全阈值时取消户外任务
+        if (!this.canSafelyGoOutdoor(game)) {
+            const checkLoc = GST.SCHEDULE_LOCATIONS[override.targetLocation];
+            if (checkLoc && checkLoc.scene === 'village' && this.currentScene !== 'village') {
+                this._logDebug('schedule', `[户外安全门控] 取消户外任务 ${override.taskId}（属性未达安全阈值）`);
+                this.deactivateTaskOverride();
+                return;
+            }
+        }
 
         let targetLoc = GST.SCHEDULE_LOCATIONS[override.targetLocation];
         if (!targetLoc) {
@@ -1177,6 +1392,8 @@
                     this.game.aiModeLogger.log('WORK', `${this.name} 到达任务目标(室内) ${override.targetLocation} | 任务:${override.taskId || '?'} | ${snap}`);
                 }
             }
+            const taskDesc = this._getTaskOverrideDesc();
+            if (taskDesc) this.stateDesc = taskDesc;
             this.scheduleReached = true;
             return;
         }
@@ -1237,8 +1454,10 @@
         if (taskDesc) this.stateDesc = taskDesc;
 
         // 卡住检测
-        this._taskOverrideTravelTimer += dt;
-        if (this._taskOverrideTravelTimer > 60) { // 60秒超时
+        const speedMult = (game && game.speedOptions) ? game.speedOptions[game.speedIdx] : 1;
+        const realDt = speedMult > 0 ? dt / speedMult : dt;
+        this._taskOverrideTravelTimer += realDt;
+        if (this._taskOverrideTravelTimer > 60) { // 60秒真实时间超时
             // 【超时保护】饥饿覆盖或状态覆盖中不传送，取消任务
             if (this._hungerOverride || this._stateOverride) {
                 console.log(`[超时保护] ${this.name} 任务超时但处于${this._hungerOverride ? '饥饿' : '状态'}覆盖中，取消任务而非传送`);
@@ -1279,31 +1498,88 @@
      * @param {string} targetLocation - 目标位置key
      * @param {string} priority - 优先级
      * @param {string} resourceType - 关联资源类型（可选）
+     * @param {string} stateDesc - 状态描述关键词，用于action-effects匹配（可选）
      */;
 
-    proto.activateTaskOverride = function(taskId, targetLocation, priority, resourceType) {
+    proto._pauseTaskOverride = function(reason = 'system_pause', source = 'system') {
+        if (!this._taskOverride || !this._taskOverride.taskId || !this._taskOverride.targetLocation) {
+            return false;
+        }
+        const wasActive = !!this._taskOverride.isActive;
+        this._taskOverride.isActive = false;
+        this._taskOverride.pausedReason = reason;
+        this._taskOverride.pausedBy = source;
+        this._taskOverrideReached = false;
+        this._taskOverrideStuckTimer = 0;
+        this._taskOverrideTravelTimer = 0;
+        if (wasActive) {
+            this._logDebug('schedule', `[P1] 暂停任务覆盖: ${this._taskOverride.taskId} (${reason})`);
+        }
+        return true;
+    }
+
+    proto._resumeTaskOverride = function(game, reason = 'resume', source = 'system') {
+        if (!this._taskOverride || !this._taskOverride.taskId || !this._taskOverride.targetLocation) {
+            return false;
+        }
+        this._taskOverride.isActive = true;
+        this._taskOverride.pausedReason = null;
+        this._taskOverride.pausedBy = source;
+        this._taskOverrideReached = false;
+        this._taskOverrideStuckTimer = 0;
+        this._taskOverrideTravelTimer = 0;
+        this._logDebug('schedule', `[P1] 恢复任务覆盖: ${this._taskOverride.taskId} (${reason})`);
+        if (game) {
+            this._navigateToScheduleTarget(this._taskOverride.targetLocation, game);
+        }
+        return true;
+    }
+
+    proto._resetTaskOverrideState = function() {
+        this._taskOverride.taskId = null;
+        this._taskOverride.source = 'task';
+        this._taskOverride.targetLocation = null;
+        this._taskOverride.isActive = false;
+        this._taskOverride.priority = 'normal';
+        this._taskOverride.resourceType = null;
+        this._taskOverride.stateDesc = null;
+        this._taskOverride.displayDesc = null;
+        this._taskOverride.effectKey = null;
+        this._taskOverride.intentId = null;
+        this._taskOverride.pausedBy = null;
+        this._taskOverride.pausedReason = null;
+        this._taskOverrideReached = false;
+        this._taskOverrideStuckTimer = 0;
+        this._taskOverrideTravelTimer = 0;
+    }
+
+    proto.activateTaskOverride = function(taskId, targetLocation, priority, resourceType, stateDesc, options = {}) {
+        const meta = (options && typeof options === 'object') ? options : {};
+        const shouldActivateNow = meta.deferActivation !== true;
+        const scheduleControl = this._getScheduleControl();
+
         // 【防卡住】P0紧急状态下拒绝接受新任务，防止与体力不支/健康危急等状态冲突导致NPC卡住
-        if (this._priorityOverride) {
-            this._logDebug('schedule', `[P1] 拒绝任务 ${taskId}：当前处于P0状态(${this._priorityOverride})，等待恢复后再接受`);
+        if (shouldActivateNow && scheduleControl.priority === 'P0') {
+            this._logDebug('schedule', `[P1] 拒绝任务 ${taskId}：当前处于P0状态(${scheduleControl.reason})，等待恢复后再接受`);
             return false;
         }
 
         // 【饥饿保护】NPC饥饿时不接受非urgent任务
-        if (this.hunger < 25 && priority !== 'urgent') {
+        if (shouldActivateNow && this.hunger < 25 && priority !== 'urgent') {
             this._logDebug('schedule', `[P1] 拒绝任务 ${taskId}：NPC饥饿(hunger=${Math.round(this.hunger)})`);
             console.log(`[P1拒绝] ${this.name} 饥饿(${Math.round(this.hunger)})<25，拒绝非urgent任务 ${taskId}`);
             return false;
         }
 
         // 【进食保护】NPC正在进食/前往进食时不接受非urgent任务
-        if (this._hungerOverride === true && priority !== 'urgent') {
+        if (shouldActivateNow && this._hungerOverride === true && priority !== 'urgent') {
             this._logDebug('schedule', `[P1] 拒绝任务 ${taskId}：NPC正在进食/前往进食`);
             console.log(`[P1拒绝] ${this.name} 正在进食/前往进食，拒绝非urgent任务 ${taskId}`);
             return false;
         }
 
         // 【状态覆盖保护】NPC处于状态覆盖中（exhausted/sick/mental）不接受任务
-        if (this._stateOverride) {
+        if (shouldActivateNow && this._stateOverride) {
             this._logDebug('schedule', `[P1] 拒绝任务 ${taskId}：NPC处于状态覆盖(${this._stateOverride})`);
             console.log(`[P1拒绝] ${this.name} 处于状态覆盖(${this._stateOverride})，拒绝任务 ${taskId}`);
             return false;
@@ -1332,34 +1608,52 @@
         }
 
         // 如果是urgent优先级且NPC正在聊天，强制中断聊天
-        if ((priority === 'urgent') && this.state === 'CHATTING') {
+        if (shouldActivateNow && priority === 'urgent' && this.state === 'CHATTING') {
             console.log(`[NPC-${this.name}] urgent任务打断聊天状态`);
             this._forceEndChat();
         }
 
         this._taskOverride.taskId = taskId;
+        this._taskOverride.source = meta.source || 'task';
         this._taskOverride.targetLocation = validLocation;
-        this._taskOverride.isActive = true;
+        this._taskOverride.isActive = shouldActivateNow;
         this._taskOverride.priority = priority || 'normal';
         this._taskOverride.resourceType = resourceType || null;
-        // 【覆盖快照】设置任务覆盖
-        const oldOverrideT = this._activeOverride;
-        this._activeOverride = 'task';
-        if (oldOverrideT !== 'task') {
-            this._logDebug('override', `[覆盖切换] ${oldOverrideT} → task（原因: 任务${taskId}）`);
-        }
+        this._taskOverride.stateDesc = stateDesc || null;
+        this._taskOverride.displayDesc = meta.displayDesc || stateDesc || null;
+        this._taskOverride.effectKey = meta.effectKey || null;
+        this._taskOverride.intentId = meta.intentId || null;
+        this._taskOverride.pausedBy = shouldActivateNow ? null : (meta.source || 'system');
+        this._taskOverride.pausedReason = shouldActivateNow ? null : (meta.deferReason || 'intent_pending');
         this._taskOverrideReached = false;
         this._taskOverrideStuckTimer = 0;
         this._taskOverrideTravelTimer = 0;
-        this._navStartTime = Date.now(); // 记录导航开始时间
-        this.scheduleReached = false;
 
-        // 设置具体的状态描述
-        const resourceNames = { woodFuel: '砍柴', food: '采集食物', explore: '探索废墟', power: '维护电力' };
-        const actionName = (resourceType && resourceNames[resourceType]) || '执行任务';
-        this.stateDesc = priority === 'urgent' ? `紧急前往${actionName}` : `前往${actionName}`;
+        if (shouldActivateNow) {
+            // 【覆盖快照】设置任务覆盖
+            const oldOverrideT = this._activeOverride;
+            this._activeOverride = 'task';
+            if (oldOverrideT !== 'task') {
+                this._logDebug('override', `[覆盖切换] ${oldOverrideT} → task（原因: 任务${taskId}）`);
+            }
+            this._navStartTime = Date.now(); // 记录导航开始时间
+            this.scheduleReached = false;
 
-        this._logDebug('schedule', `[P1] 激活任务覆盖: ${taskId} → ${validLocation} (${priority})`);
+            // 设置具体的状态描述
+            if (stateDesc) {
+                this.stateDesc = `前往${stateDesc}`;
+            } else {
+                const resourceNames = { woodFuel: '砍柴', food: '采集食物', explore: '探索废墟', power: '维护电力' };
+                const actionName = (resourceType && resourceNames[resourceType]) || '执行任务';
+                this.stateDesc = priority === 'urgent' ? `紧急前往${actionName}` : `前往${actionName}`;
+            }
+
+            this._logDebug('schedule', `[P1] 激活任务覆盖: ${taskId} → ${validLocation} (${priority})`);
+        } else {
+            this._logDebug('schedule', `[P1] 挂起任务覆盖: ${taskId} → ${validLocation} (${priority})`);
+        }
+
+        return true;
     }
 
     /**
@@ -1371,10 +1665,15 @@
             this._logDebug('schedule', `[P1] 取消任务覆盖: ${this._taskOverride.taskId}`);
         }
         this._taskOverride.taskId = null;
+        this._taskOverride.source = 'task';
         this._taskOverride.targetLocation = null;
         this._taskOverride.isActive = false;
         this._taskOverride.priority = 'normal';
         this._taskOverride.resourceType = null;
+        this._taskOverride.stateDesc = null;
+        this._taskOverride.displayDesc = null;
+        this._taskOverride.effectKey = null;
+        this._taskOverride.intentId = null;
         this._taskOverrideReached = false;
         this._taskOverrideStuckTimer = 0;
         this._taskOverrideTravelTimer = 0;

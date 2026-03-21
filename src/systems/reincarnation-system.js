@@ -344,7 +344,7 @@ class ReincarnationSystem {
             }
 
             // 对话规则
-            hint += '说话时可以直接引用前世经验，主动提出具体的生存策略和分工建议。';
+            hint += '以上前世记忆作为你的背景情报参考。你可以在对话中自然引用，也可以不提——根据当前对话情境自行判断。重点关注当前的实际状况和数据。';
         } else {
             // 非轮回模式：模糊语言
             if (this.currentLifeNumber === 2) {
@@ -437,7 +437,7 @@ class ReincarnationSystem {
             hint += this._generateStrategyAdvice(lastLife);
 
             // 轮回模式专属指令
-            hint += '【重要】你完全记得所有轮回的细节，应主动复用历史最好一世的策略，并根据反复出现的失败模式调整。第1天开始就应明确知道优先做什么。';
+            hint += '以上前世记忆作为你做决策的背景情报。请综合当前实际资源、体力、天气等状况自主决策，前世经验仅作参考。';
 
         } else {
             // 非轮回模式：原有的半模糊经验
@@ -694,11 +694,11 @@ class ReincarnationSystem {
                     { npcId: 'old_qian', task: 'COORDINATE', targetLocation: 'furnace_plaza', reason: '统筹第4天准备' },
                     { npcId: 'su_doctor', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗准备' },
                     { npcId: 'ling_yue', task: 'SCOUT_RUINS', targetLocation: 'ruins_site', reason: '最后侦察' },
-                    { npcId: 'qing_xuan', task: 'REPAIR_RADIO', targetLocation: 'workshop_door', reason: '修无线电' },
+                    { npcId: 'qing_xuan', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗准备' },
                 ],
                 4: [
-                    { npcId: 'zhao_chef', task: 'MAINTAIN_FURNACE', targetLocation: 'furnace_plaza', reason: '维护暖炉(室内)' },
-                    { npcId: 'lu_chen', task: 'MAINTAIN_FURNACE', targetLocation: 'furnace_plaza', reason: '维护暖炉(室内)' },
+                    { npcId: 'zhao_chef', task: 'PREPARE_WARMTH', targetLocation: 'warehouse_door', reason: '准备御寒物资(室内)' },
+                    { npcId: 'lu_chen', task: 'PREPARE_WARMTH', targetLocation: 'warehouse_door', reason: '准备御寒物资(室内)' },
                     { npcId: 'li_shen', task: 'DISTRIBUTE_FOOD', targetLocation: 'kitchen_door', reason: '分配食物(室内)' },
                     { npcId: 'wang_teacher', task: 'MAINTAIN_POWER', targetLocation: 'workshop_door', reason: '维护电力(室内)' },
                     { npcId: 'old_qian', task: 'MAINTAIN_ORDER', targetLocation: 'furnace_plaza', reason: '维持秩序(室内)' },
@@ -756,7 +756,7 @@ class ReincarnationSystem {
             // 前世第2天有人冻死：减少户外工作，全部转室内
             plan.dayPlans[2] = plan.dayPlans[2].map(a => {
                 if (a.task === 'COLLECT_WOOD' || a.task === 'COLLECT_FOOD' || a.task === 'SCOUT_RUINS') {
-                    return { ...a, task: 'MAINTAIN_FURNACE', targetLocation: 'furnace_plaza', reason: `前世${day2FrozenDeaths.map(d => d.name).join('、')}第2天冻死，改为室内维护` };
+                    return { ...a, task: 'PREPARE_WARMTH', targetLocation: 'warehouse_door', reason: `前世${day2FrozenDeaths.map(d => d.name).join('、')}第2天冻死，改为室内准备御寒` };
                 }
                 return a;
             });
@@ -854,7 +854,7 @@ class ReincarnationSystem {
     /** 生成工作安排摘要（≤200字符） */
     _generateWorkPlanSummary(plan) {
         const nameMap = { zhao_chef: '赵', lu_chen: '陆', li_shen: '李', wang_teacher: '王', old_qian: '钱', su_doctor: '苏', ling_yue: '玥', qing_xuan: '璇' };
-        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食', COLLECT_MATERIAL: '探索', MAINTAIN_POWER: '电力', COORDINATE: '统筹', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞', BUILD_FURNACE: '建炉', MAINTAIN_FURNACE: '维炉', MAINTAIN_ORDER: '秩序', DISTRIBUTE_FOOD: '分食', REPAIR_RADIO: '电台', REST_RECOVER: '休息' };
+        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食', COLLECT_MATERIAL: '探索', MAINTAIN_POWER: '电力', COORDINATE: '统筹', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞', BUILD_FURNACE: '建炉', PREPARE_WARMTH: '御寒', MAINTAIN_ORDER: '秩序', DISTRIBUTE_FOOD: '分食', REST_RECOVER: '休息' };
         // 只输出Day1的安排
         const day1 = (plan.dayPlans[1] || []).map(a => `${nameMap[a.npcId] || '?'}${taskShort[a.task] || a.task}`).join(',');
         let summary = `D1:${day1}`;
@@ -1133,7 +1133,7 @@ class ReincarnationSystem {
         if (!dayPlan) return '';
 
         const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
-        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', MAINTAIN_FURNACE: '维护暖炉', MAINTAIN_ORDER: '维持秩序', DISTRIBUTE_FOOD: '分配食物', REPAIR_RADIO: '修无线电', REST_RECOVER: '休息' };
+        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', PREPARE_WARMTH: '御寒', MAINTAIN_ORDER: '维持秩序', DISTRIBUTE_FOOD: '分配食物', REST_RECOVER: '休息' };
 
         let summary = `【${nameMap[holder.id] || holder.name}的工作安排·第${day}天】\n`;
         for (const assignment of dayPlan) {

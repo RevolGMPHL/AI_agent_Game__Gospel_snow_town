@@ -87,9 +87,11 @@ this.weatherSystem = GST.WeatherSystem ? new GST.WeatherSystem(this) : null;
         }
 this.resourceSystem = GST.ResourceSystem ? new GST.ResourceSystem(this) : null;
 this.furnaceSystem = GST.FurnaceSystem ? new GST.FurnaceSystem(this) : null;
+this.machineSystem = GST.MachineSystem ? new GST.MachineSystem(this) : null;
 this.deathSystem = GST.DeathSystem ? new GST.DeathSystem(this) : null;
 this.taskSystem = GST.TaskSystem ? new GST.TaskSystem(this) : null;
 this.eventSystem = GST.EventSystem ? new GST.EventSystem(this) : null;
+this.councilSystem = GST.CouncilSystem ? new GST.CouncilSystem(this) : null;
 
         // 轮回记忆系统（非轮回模式下构造函数内部自动强制第1世）
 this.reincarnationSystem = GST.ReincarnationSystem ? new GST.ReincarnationSystem(this) : null;
@@ -104,10 +106,7 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
         // 急救包系统
         this._medkitCount = 0;           // 急救包库存
         this._medkitCraftProgress = 0;   // 制作进度
-        // 无线电修理系统
-        this._radioRepairProgress = 0;   // 修理进度 (0~1)
-        this._radioRepaired = false;     // 是否已修好
-        this._radioRescueTriggered = false; // 是否已触发求救
+        // 无线电修理系统已移除（v4.5）
         // 食物浪费减少标记
         this._foodWasteReduction = false;
         this._foodWasteReductionTimer = 0;
@@ -152,6 +151,13 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             delete this._pendingWorkPlanEvent;
         }
 
+        // 【开局资源随机提示】让玩家知道这局的资源配比
+        if (this.resourceSystem) {
+            const rs = this.resourceSystem;
+            const diffName = this.difficulty ? this.difficulty.name : '简单';
+            this.addEvent(`📦 初始物资清点（${diffName}难度）：🪵木柴${Math.round(rs.woodFuel)} 🍞食物${Math.round(rs.food)} ⚡电力${Math.round(rs.power)}`);
+        }
+
         // 向右侧「决策动态」面板写入第1天分工方案卡片
         this._addWorkPlanCardToDecisionPanel();
 
@@ -172,6 +178,10 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
         // 自动存档
         this.autoSaveTimer = 0;
         this.autoSaveInterval = 120;
+
+        // 首日开局晨会调度（新局/轮回触发，读档跳过）
+        this._openingCouncilDone = false;
+        this._openingCouncilScheduled = false;
 
         // 主循环（支持后台运行）
         this.lastTime = performance.now();
@@ -205,7 +215,40 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
         // 更新轮回世数UI
         this._updateReincarnationUI();
 
+        this._scheduleOpeningCouncil();
+
 console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
+    }
+
+    _scheduleOpeningCouncil(options) {
+        const force = !!(options && options.force);
+        if (this._openingCouncilDone || this._openingCouncilScheduled) return false;
+        if (!force && this.dayCount !== 1) return false;
+        if (!this.taskSystem || !this.councilSystem || !this.councilSystem.openOpeningCouncil) return false;
+
+        this._openingCouncilScheduled = true;
+        setTimeout(() => {
+            this._openingCouncilScheduled = false;
+            if (this._openingCouncilDone) return;
+            if (!force && this.dayCount !== 1) return;
+            if (!this.taskSystem || !this.councilSystem) return;
+
+            if (this.taskSystem._taskGeneratedForDay !== this.dayCount && this.taskSystem.onDayChange) {
+                this.taskSystem.onDayChange(this.dayCount);
+            }
+            if (this.councilSystem.isActive) return;
+
+            this.paused = true;
+            const btn = document.getElementById('btn-pause');
+            if (btn) btn.textContent = '▶️';
+
+            const opened = this.councilSystem.openOpeningCouncil();
+            if (opened) {
+                this._openingCouncilDone = true;
+                this.addEvent(`🌅 第${this.dayCount}天一开局，众人先召开晨会决定工作分配`);
+            }
+        }, 200);
+        return true;
     }
 
     /**
@@ -232,23 +275,23 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
         if (holder) {
             holder.workPlan = workPlan;
             const lifeNum = this.reincarnationSystem.getLifeNumber();
-            console.log(`[WorkPlan] 第${lifeNum}世分工方案已存储到${holder.name}`);
+            console.log(`[WorkPlan] 第${lifeNum}世晨会建议稿已存储到${holder.name}`);
             // 延迟添加事件，因为构造函数中 eventLog 可能尚未初始化
-            // 构建详细的分工方案日志
+            // 构建详细的分工建议日志
             const strategyLabel = workPlan.strategy || '默认';
-            let detailLog = `\n📋━━━ 第${lifeNum}世·${holder.name}的分工方案（策略:${strategyLabel}）━━━\n`;
+            let detailLog = `\n📋━━━ 第${lifeNum}世·${holder.name}的晨会建议稿（策略:${strategyLabel}）━━━\n`;
             detailLog += `${workPlan.summary || workPlan.workPlanSummary}\n`;
             // 显示第1天的分工详情
             if (workPlan.dayPlans && workPlan.dayPlans[1]) {
                 const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
-                const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', MAINTAIN_FURNACE: '维护暖炉', MAINTAIN_ORDER: '维持秩序', REST_RECOVER: '休息' };
+                const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', PREPARE_WARMTH: '御寒', MAINTAIN_ORDER: '维持秩序', REST_RECOVER: '休息' };
                 for (const a of workPlan.dayPlans[1]) {
                     const name = nameMap[a.npcId] || a.npcId;
                     const task = taskShort[a.task] || a.task;
                     detailLog += `  ${name}→${task}${a.reason ? '(' + a.reason + ')' : ''}\n`;
                 }
             }
-            detailLog += `📋━━━ 方案已下达，各人按此执行 ━━━`;
+            detailLog += `📋━━━ 晨会开始前先供大家参考，最终分工以晨会表决为准 ━━━`;
             this._pendingWorkPlanEvent = detailLog;
         }
 
@@ -256,48 +299,19 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
         if (workPlan.dayPlans) {
             const days = Object.keys(workPlan.dayPlans);
             const npcCounts = days.map(d => workPlan.dayPlans[d].length);
-            console.log(`[WorkPlan] 第${this.reincarnationSystem.getLifeNumber()}世分工方案生成完毕: { ${days.map((d, i) => `day${d}: ${npcCounts[i]}人`).join(', ')} }`);
+            console.log(`[WorkPlan] 第${this.reincarnationSystem.getLifeNumber()}世晨会建议稿生成完毕: { ${days.map((d, i) => `day${d}: ${npcCounts[i]}人`).join(', ')} }`);
         }
     }
 
     // ---- 向决策面板写入分工方案卡片 ----
 
     _addWorkPlanCardToDecisionPanel() {
+        // 【v4.16】分工建议稿已由右上角常驻面板(#work-plan-panel)实时显示
+        // 此处只在事件日志中留一条简要通知
         if (!this.reincarnationSystem) return;
         const holder = this.reincarnationSystem.getWorkPlanHolder();
         if (!holder || !holder.workPlan) return;
-
-        const chatLogEl = document.getElementById('chat-log-content');
-        if (!chatLogEl) return;
-
-        const workPlan = holder.workPlan;
-        const lifeNum = this.reincarnationSystem.getLifeNumber();
-        const strategyLabel = workPlan.strategy || '默认';
-        const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
-        const roleEmoji = { zhao_chef: '👨‍🍳', lu_chen: '💪', li_shen: '👩‍🍳', wang_teacher: '👨‍🏫', old_qian: '👴', su_doctor: '👨‍⚕️', ling_yue: '🔍', qing_xuan: '🧪' };
-        const taskShort = { COLLECT_WOOD: '🪓 收集木柴', COLLECT_FOOD: '🍞 收集食物', COLLECT_MATERIAL: '🔍 探索废墟', MAINTAIN_POWER: '⚡ 维护电力', COORDINATE: '📢 维持秩序', PREPARE_MEDICAL: '💊 医疗救治', SCOUT_RUINS: '🗺️ 鼓舞士气', BOOST_MORALE: '🎵 鼓舞士气', BUILD_FURNACE: '🔥 建暖炉', MAINTAIN_FURNACE: '🔥 维护暖炉', MAINTAIN_ORDER: '🛡️ 维持秩序', DISTRIBUTE_FOOD: '🍳 分配食物', REST_RECOVER: '💤 休息', REPAIR_RADIO: '📻 修电台', SET_TRAP: '🪤 设陷阱' };
-
-        let planHTML = `<div class="decision-card" style="border-left:3px solid #c084fc; margin:8px 4px; padding:10px 12px; background:linear-gradient(135deg, rgba(55,30,100,0.85), rgba(30,20,60,0.85)); border-radius:8px; font-size:12px; line-height:1.7;">`;
-        planHTML += `<div style="font-weight:bold; color:#e9d5ff; font-size:14px; margin-bottom:6px;">📋 第${lifeNum}世 · 第1天分工方案</div>`;
-        planHTML += `<div style="color:#a78bfa; font-size:11px; margin-bottom:6px;">策略: ${strategyLabel} · ${workPlan.summary || ''}</div>`;
-
-        const day1 = workPlan.dayPlans && workPlan.dayPlans[1];
-        if (day1) {
-            for (const a of day1) {
-                const name = nameMap[a.npcId] || a.npcId;
-                const em = roleEmoji[a.npcId] || '👤';
-                const task = taskShort[a.task] || a.task;
-                const npc = this.npcs.find(n => n.id === a.npcId);
-                const stBar = npc ? `<span style="color:#6b7280; font-size:10px; margin-left:4px;">体力${Math.round(npc.stamina)}</span>` : '';
-                planHTML += `<div style="color:#e2e8f0; padding:1px 0;">${em} <b>${name}</b>：${task}${stBar}</div>`;
-            }
-        }
-        planHTML += `</div>`;
-
-        const planCard = document.createElement('div');
-        planCard.innerHTML = planHTML;
-        chatLogEl.appendChild(planCard.firstElementChild);
-        chatLogEl.scrollTop = chatLogEl.scrollHeight;
+        // 面板会自动从reincarnationSystem读取workPlan，无需手动写入DOM
     }
 
     // ---- NPC 初始化 ----
@@ -371,9 +385,14 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
     /** NPC 之间碰撞推挤 —— 圆形碰撞体，互相排斥不重叠 */
 
     _resolveNPCCollisions() {
-        const radius = GST.TILE * 0.45; // 每个NPC的碰撞半径
-        const minDist = radius * 2;  // 两个NPC之间的最小距离
-        const pushStrength = 2.0;    // 推挤力度（加大）
+        // 【室内/室外差异化碰撞参数】
+        const outdoorRadius = GST.TILE * 0.45;
+        const outdoorMinDist = outdoorRadius * 2;
+        const outdoorPush = 0.8;
+        // 室内空间狭小，碰撞半径和推力大幅缩小，避免反复推挤导致抖动
+        const indoorRadius = GST.TILE * 0.25;
+        const indoorMinDist = indoorRadius * 2;
+        const indoorPush = 0.3;
 
         // 按场景分组，对所有场景都做碰撞检测，而不只是摄像机当前场景
         const sceneGroups = {};
@@ -388,15 +407,23 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
         for (const scene in sceneGroups) {
             const sceneNPCs = sceneGroups[scene];
             const map = this.maps[scene];
-            this._resolveGroupCollisions(sceneNPCs, minDist, pushStrength, map);
+            const isIndoor = scene !== 'village';
+            if (isIndoor) {
+                // 【修复】室内场景完全跳过碰撞推挤，只做气泡偏移
+                // 室内NPC通过座位系统精确定位，碰撞推力在狭小空间会导致反复推进墙壁/家具的死循环
+                this._computeBubbleOffsets(sceneNPCs, indoorMinDist);
+            } else {
+                this._resolveGroupCollisions(sceneNPCs, outdoorMinDist, outdoorPush, map, false);
+            }
         }
 
-        // 气泡偏移只计算当前场景
-const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene && !n.isSleeping && !n.isEating && !n.isDead);
-        this._computeBubbleOffsets(visibleNPCs, minDist);
+        // 气泡偏移只计算当前场景（使用室外碰撞半径作为默认值）
+        const bubbleMinDist = this.currentScene === 'village' ? outdoorMinDist : indoorMinDist;
+        const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene && !n.isSleeping && !n.isEating && !n.isDead);
+        this._computeBubbleOffsets(visibleNPCs, bubbleMinDist);
     }
 
-    _resolveGroupCollisions(sceneNPCs, minDist, pushStrength, map) {
+    _resolveGroupCollisions(sceneNPCs, minDist, pushStrength, map, isIndoor) {
 
         for (let i = 0; i < sceneNPCs.length; i++) {
             for (let j = i + 1; j < sceneNPCs.length; j++) {
@@ -453,9 +480,10 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
                     a.stuckTimer = Math.max(a.stuckTimer, 1.0);
                     b.stuckTimer = Math.max(b.stuckTimer, 1.0);
 
-                    // 【增强】持续碰撞计时 —— 累积碰撞时间
-                    a.collisionStallTimer = (a.collisionStallTimer || 0) + 0.016;
-                    b.collisionStallTimer = (b.collisionStallTimer || 0) + 0.016;
+                    // 【增强】持续碰撞计时 —— 使用真实时间累积，避免5倍速/低帧率失真
+                    const realDt = this._lastRealDt || 0.016;
+                    a.collisionStallTimer = (a.collisionStallTimer || 0) + realDt;
+                    b.collisionStallTimer = (b.collisionStallTimer || 0) + realDt;
 
                     // 【增强】移动NPC优先通过，静止NPC主动让路
                     // 当一个在走路、一个不在走路，且碰撞持续超过0.3秒时，静止的NPC让路
@@ -478,8 +506,8 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
                             }
                         }
 
-                        // 【增强】碰撞持续超过2.5秒 → 强制传送脱困（解决室内死锁）
-                        if (a.collisionStallTimer > 2.5 && b.collisionStallTimer > 2.5) {
+                    // 【增强】碰撞持续超过2.5秒 → 强制传送脱困（仅室外场景；室内空间太小传送会导致闪现）
+                        if (!isIndoor && a.collisionStallTimer > 2.5 && b.collisionStallTimer > 2.5) {
                             // 【修复】双方都有保护状态时跳过传送，仅使用推力
                             const aProtected = a.isEating || a.isSleeping || a._isBeingTreated || a._currentBehaviorLock;
                             const bProtected = b.isEating || b.isSleeping || b._isBeingTreated || b._currentBehaviorLock;
@@ -492,9 +520,6 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
                                 const teleported = this._forceUnstuck(a, b, map);
                                 if (teleported) {
                                     console.log(`[碰撞脱困] ${a.name} 和 ${b.name} 碰撞死锁${a.collisionStallTimer.toFixed(1)}秒，强制脱困`);
-                                    if (this.addEvent) {
-                                        this.addEvent(`⚠️ ${a.name} 和 ${b.name} 在${a.currentScene}卡住了，强制脱困`);
-                                    }
                                 }
                             }
                         }
@@ -510,7 +535,8 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
 
                     // 【修复】如果两个NPC都没在移动且都不在对话/睡觉/吃饭，给随机推力
                     // 避免两个NPC面对面卡死不动
-                    if (!a.isMoving && !b.isMoving && a.state !== 'CHATTING' && b.state !== 'CHATTING'
+                    // 【重要】室内场景不给随机推力，室内空间太小随机推力会导致抖动
+                    if (!isIndoor && !a.isMoving && !b.isMoving && a.state !== 'CHATTING' && b.state !== 'CHATTING'
                         && !a.isSleeping && !b.isSleeping && !a.isEating && !b.isEating) {
                         // 持有行为锁的NPC大幅减弱推力
                         const aHasLock = a._currentBehaviorLock;
@@ -901,6 +927,8 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
 
     update(dt) {
         const gameDt = dt * this.speedOptions[this.speedIdx];
+        this._lastRealDt = dt;
+        this._lastGameDt = gameDt;
 
         // 时间流逝
         const oldH = Math.floor(this.gameTimeSeconds / 3600);
@@ -1007,25 +1035,13 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
         if (this.weatherSystem) this.weatherSystem.update(gameDt);
         if (this.resourceSystem) this.resourceSystem.update(gameDt);
         if (this.furnaceSystem) this.furnaceSystem.update(gameDt);
+        if (this.machineSystem) this.machineSystem.update(gameDt);
         if (this.deathSystem) this.deathSystem.update(gameDt);
         if (this.taskSystem) this.taskSystem.update(gameDt);
         if (this.eventSystem) this.eventSystem.update(gameDt);
         if (this.aiModeLogger) this.aiModeLogger.update(gameDt);
 
-        // 【任务5】无线电求救检测：修好无线电 + 第4天时触发救援信号
-        if (this._radioRepaired && !this._radioRescueTriggered && this.dayCount >= 4) {
-            this._radioRescueTriggered = true;
-            if (this.addEvent) {
-                this.addEvent(`📻🆘 无线电发出了求救信号！远方传来微弱的回应："坚持住…救援队正在路上…"`);
-                this.addEvent(`🎉 这给了所有人莫大的希望！全员San值+10`);
-            }
-            // 全员San值+10
-            for (const npc of this.npcs) {
-                if (!npc.isDead) {
-                    npc.sanity = Math.min(100, npc.sanity + 10);
-                }
-            }
-        }
+        // 无线电求救系统已移除（v4.5）
 
         // NPC 更新（传入 gameDt 使饥饿、移动等都受倍速影响）
         for (const npc of this.npcs) {
@@ -1111,6 +1127,16 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
             this.weather = this.weatherSystem.currentWeather;
             this._updateRainIntensity();
         }
+
+        // 【v4.8】资源危机检测 → 自动触发投票决策会议
+        if (this.councilSystem && !this.paused) {
+            this.councilSystem.checkResourceCrisisTrigger();
+        }
+
+        // 【v4.8】清理过期的投票决策分工
+        if (GST.CouncilSystem && GST.CouncilSystem.cleanExpiredCouncilTasks) {
+            GST.CouncilSystem.cleanExpiredCouncilTasks(this.npcs);
+        }
     }
 
     /**
@@ -1187,8 +1213,8 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
             const staminaGain = skipHours * 8;
             npc.stamina = Math.min(100, npc.stamina + staminaGain);
 
-            // San值恢复：睡眠中每游戏小时恢复约3点
-            const sanityGain = skipHours * 3;
+            // San值恢复：睡眠中每游戏小时恢复约6点（v4.6增强：3→6）
+            const sanityGain = skipHours * 6;
             npc.sanity = Math.min(100, npc.sanity + sanityGain);
 
             // 健康恢复：睡眠中每游戏小时恢复约1点
@@ -1274,6 +1300,15 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
             console.log(`[跳夜] 资源补算: 木柴=${rs.woodFuel.toFixed(1)} 电力=${rs.power.toFixed(1)} (消耗${skipHours.toFixed(1)}小时)`);
         }
 
+        // 3.5 补算自动化机器产出（发电机/伐木机在跳夜期间也持续运行）
+        if (this.machineSystem) {
+            const ms = this.machineSystem;
+            // 模拟跳过时段的机器运行（传入跳过的总秒数）
+            if (ms.generator.built) ms._updateMachineRunning('generator', skipSeconds);
+            if (ms.lumberMill.built) ms._updateMachineRunning('lumberMill', skipSeconds);
+            console.log(`[跳夜] 机器补算: 发电机=${ms.generator.running ? '运行' : '停机'} 伐木机=${ms.lumberMill.running ? '运行' : '停机'}`);
+        }
+
         // 4. 设置最终时间为06:00
         this.gameTimeSeconds = targetSeconds;
 
@@ -1304,7 +1339,13 @@ const visibleNPCs = this.npcs.filter(n => n.currentScene === this.currentScene &
         this.paused = !this.paused;
         const btn = document.getElementById('btn-pause');
         btn.textContent = this.paused ? '▶️' : '⏸️';
-        if (this.paused) this.addEvent('⏸️ 已暂停');
+        if (this.paused) {
+            this.addEvent('⏸️ 已暂停');
+            // 弹出营地讨论弹窗
+            if (this.councilSystem) {
+                this.councilSystem.open();
+            }
+        }
     }
 
     cycleSpeed() {
@@ -1396,9 +1437,11 @@ this.weatherSystem = GST.WeatherSystem ? new GST.WeatherSystem(this) : null;
         }
 this.resourceSystem = GST.ResourceSystem ? new GST.ResourceSystem(this) : null;
 this.furnaceSystem = GST.FurnaceSystem ? new GST.FurnaceSystem(this) : null;
+this.machineSystem = GST.MachineSystem ? new GST.MachineSystem(this) : null;
 this.deathSystem = GST.DeathSystem ? new GST.DeathSystem(this) : null;
 this.taskSystem = GST.TaskSystem ? new GST.TaskSystem(this) : null;
 this.eventSystem = GST.EventSystem ? new GST.EventSystem(this) : null;
+this.councilSystem = GST.CouncilSystem ? new GST.CouncilSystem(this) : null;
 
         // 8. 重新初始化轮回系统（更新世数）
         if (this.reincarnationSystem) {
@@ -1493,6 +1536,10 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             this._saveDebugLogToServer(true);
         }, 5 * 60 * 1000);
 
+        this._openingCouncilDone = false;
+        this._openingCouncilScheduled = false;
+        this._scheduleOpeningCouncil({ force: true });
+
         // 18. 立即保存新世代的初始状态（断点续玩支持：刷新后可继续）
         this.save();
 
@@ -1500,6 +1547,13 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
         const lifeNum = this.reincarnationSystem ? this.reincarnationSystem.getLifeNumber() : 1;
         this.addEvent(`🔄 轮回重生！第${lifeNum}世开始`);
         this.addEvent(`📅 第1天 08:00 — 带着前世的记忆重新开始`);
+
+        // 【开局资源随机提示】轮回后资源重新随机分配
+        if (this.resourceSystem) {
+            const rs = this.resourceSystem;
+            const diffName = this.difficulty ? this.difficulty.name : '简单';
+            this.addEvent(`📦 物资清点（${diffName}难度）：🪵木柴${Math.round(rs.woodFuel)} 🍞食物${Math.round(rs.food)} ⚡电力${Math.round(rs.power)}`);
+        }
 
         console.log(`[Game] 🔄 轮回重生完成！进入第${lifeNum}世`);
     }
@@ -1520,6 +1574,7 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             // 子系统状态
             resourceSystem: this.resourceSystem ? this.resourceSystem.serialize() : null,
             furnaceSystem: this.furnaceSystem ? this.furnaceSystem.serialize() : null,
+            machineSystem: this.machineSystem ? this.machineSystem.serialize() : null,
             deathSystem: this.deathSystem ? this.deathSystem.serialize() : null,
             taskSystem: this.taskSystem ? this.taskSystem.serialize() : null,
             eventSystem: this.eventSystem ? this.eventSystem.serialize() : null,
@@ -1527,9 +1582,7 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             // 全局物品/状态
             _medkitCount: this._medkitCount,
             _medkitCraftProgress: this._medkitCraftProgress,
-            _radioRepairProgress: this._radioRepairProgress,
-            _radioRepaired: this._radioRepaired,
-            _radioRescueTriggered: this._radioRescueTriggered,
+
             _foodWasteReduction: this._foodWasteReduction,
             _patrolBonus: this._patrolBonus,
             _furnaceMaintained: this._furnaceMaintained,
@@ -1572,6 +1625,9 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             if (d.furnaceSystem && this.furnaceSystem && this.furnaceSystem.deserialize) {
                 this.furnaceSystem.deserialize(d.furnaceSystem);
             }
+            if (d.machineSystem && this.machineSystem && this.machineSystem.deserialize) {
+                this.machineSystem.deserialize(d.machineSystem);
+            }
             if (d.deathSystem && this.deathSystem && this.deathSystem.deserialize) {
                 this.deathSystem.deserialize(d.deathSystem);
             }
@@ -1587,9 +1643,7 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             // 全局物品/状态恢复
             if (d._medkitCount !== undefined) this._medkitCount = d._medkitCount;
             if (d._medkitCraftProgress !== undefined) this._medkitCraftProgress = d._medkitCraftProgress;
-            if (d._radioRepairProgress !== undefined) this._radioRepairProgress = d._radioRepairProgress;
-            if (d._radioRepaired !== undefined) this._radioRepaired = d._radioRepaired;
-            if (d._radioRescueTriggered !== undefined) this._radioRescueTriggered = d._radioRescueTriggered;
+
             if (d._foodWasteReduction !== undefined) this._foodWasteReduction = d._foodWasteReduction;
             if (d._patrolBonus !== undefined) this._patrolBonus = d._patrolBonus;
             if (d._furnaceMaintained !== undefined) this._furnaceMaintained = d._furnaceMaintained;
@@ -1598,6 +1652,8 @@ this.aiModeLogger = (this.isAgentMode && GST.AIModeLogger) ? new GST.AIModeLogge
             if (this.weatherSystem) {
                 this.weatherSystem.currentWeather = this.weather;
             }
+            this._openingCouncilDone = true;
+            this._openingCouncilScheduled = false;
             this._updateRainIntensity();
             console.log(`[Game] 存档加载成功：第${this.dayCount}天 ${this.getTimeStr()} 模式=${d.mode || 'unknown'}`);
             return true;

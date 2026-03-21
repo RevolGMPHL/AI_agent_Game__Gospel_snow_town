@@ -245,10 +245,11 @@ ${game.reincarnationSystem ? (() => { const lessons = game.reincarnationSystem.g
 5. 你的思考和行为应该受到你当前身心状态和生存压力的影响。
 6. 如果温度极低（<-20°C），你在户外会非常痛苦和恐惧。
 7. 如果你看到有人倒下或状态很差，你应该去帮助他们。
+${game.reincarnationSystem && game.reincarnationSystem.getLifeNumber() > 1 ? '8. 🔮【轮回记忆·参考情报】上方有前世记忆信息作为背景参考。你可以根据自己的判断决定是否在thought或expression中提及前世经验。前世记忆是你的情报来源之一，但你的决策应基于当前的实际状况。不要每句话都提前世，只在你觉得确实相关时自然地引用。' : '8. 这是第一世，你没有任何前世记忆。不要提及"上一世""前世"等概念，专注于当前的末日生存处境。'}
 ${game.weatherSystem && !game.weatherSystem.canGoOutside() ? '🚨 今天严禁外出！-60°C！在户外会迅速冻死！' : ''}
 ${game.weatherSystem && game.weatherSystem.getEffectiveTemp() < -20 ? '🚨🚨 户外极度危险！温度' + game.weatherSystem.getEffectiveTemp() + '°C！尽量待在暖炉旁！' : ''}
 ${this.id === 'old_qian' ? `你是退休镇长/精神领袖，在末日中承担起安抚情绪、调解冲突的重任。你的领导力和人生阅历是团队的精神支柱。清璇是你的孙女，你格外牵挂她。` : ''}
-${this.id === 'qing_xuan' ? `你是16岁的药剂师学徒/陷阱工，老钱的孙女。负责制作草药制剂、布置警报陷阱、修理无线电。你聪明好学、心灵手巧，在危机中逐渐展现超越年龄的能力。你暗恋陆辰。` : ''}
+${this.id === 'qing_xuan' ? `你是16岁的药剂师学徒，老钱的孙女。负责制作草药制剂和急救包、协助医疗救治。你聪明好学、心灵手巧，在危机中逐渐展现超越年龄的能力。你暗恋陆辰。` : ''}
 ${this.id === 'wang_teacher' ? `你是技师/规划师，末日前是哲学教师，现在负责维修发电机、设计暖炉扩建方案、统筹全队效率。你暗恋歆玥，理性冷静但有时过于冷酷。` : ''}
 ${this.id === 'zhao_chef' ? `你是伐木工/锅炉工，全镇体力担当。负责砍柴、搬运、暖炉维护。你沉默寡言但行动力极强，暗恋李婶。压力大时San值下降更快。` : ''}
 ${this.id === 'li_shen' ? `你是物资总管/炊事长，全镇后勤管家。负责管理仓库、烹饪分配食物。你热心精明，照顾所有人。陆辰是你儿子，你会不惜一切保护他。` : ''}
@@ -275,6 +276,7 @@ ${this._isCompanion && this._companionLeader ? `【同伴模式】正在跟随${
 ${this._lastActionThought ? `【最近行动决策】${this._lastActionThought}` : ''}
 ${this._hungerOverride ? '🍽️ 【重要】我正在去吃饭的路上或正在吃饭！不要改变目标！' : ''}
 ${this._taskOverride && this._taskOverride.isActive ? `📋 【重要】我正在执行任务：${this._taskOverride.taskId}，前往${this._taskOverride.targetLocation}` : ''}
+${this._councilTask ? `🗳️ 【投票决策分工】全体成员刚开过紧急决策会议，投票决定让我执行：「${this._councilTask}」。我要按这个决策行动！` : ''}
 ${this._stateOverride ? `🚨 我正在紧急处理：${this._stateOverride}，不要干预` : ''}
 ${this._priorityOverride ? `⚠️ 当前P0紧急状态：${this._priorityOverride}` : ''}
 请根据上面的实际情境，决定你现在的状态。
@@ -284,7 +286,7 @@ ${this._priorityOverride ? `⚠️ 当前P0紧急状态：${this._priorityOverri
 - wantChat可以填写附近或同一区域的人名（你可以走过去找他们），没人时必须留空字符串
 用纯 JSON 回复：
 {
-  "thought": "内心独白（基于真实环境的想法，必须提到当前最担忧的属性或最想推进的目标）",
+  "thought": "内心独白（基于真实环境的想法，必须提到当前最担忧的属性或最想推进的目标${game.reincarnationSystem && game.reincarnationSystem.getLifeNumber() > 1 ? '。如果有前世记忆，必须引用具体的前世事件' : ''}）",
   "mood": "两字心情（必须符合当前处境）",
   "expression": "说出的话（简短，或空字符串）",
   "wantChat": "同场景的人名（可以走过去找他，或空字符串）",

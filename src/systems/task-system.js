@@ -23,15 +23,16 @@ const TASK_TYPES = {
     BOOST_MORALE:     'BOOST_MORALE',      // 鼓舞士气
     COORDINATE:       'COORDINATE',        // 统筹协调
     BUILD_FURNACE:    'BUILD_FURNACE',     // 修建暖炉
-    MAINTAIN_FURNACE: 'MAINTAIN_FURNACE',  // 维护暖炉（添加燃料）
     DISTRIBUTE_FOOD:  'DISTRIBUTE_FOOD',   // 分配食物
     MAINTAIN_ORDER:   'MAINTAIN_ORDER',    // 维持秩序
     REST_RECOVER:     'REST_RECOVER',      // 休息恢复
     // ---- 新增特殊角色任务 ----
     SCOUT_RUINS:      'SCOUT_RUINS',       // 废墟侦察（歆玥）
     // CRAFT_MEDICINE已合并到PREPARE_MEDICAL
-    SET_TRAP:         'SET_TRAP',          // 布置陷阱（清璇）
-    REPAIR_RADIO:     'REPAIR_RADIO',      // 修理无线电（清璇）
+    // SET_TRAP已移除（v4.6: 效果太弱不值得浪费人力）
+    // REPAIR_RADIO已移除（v4.5: 性价比太低，浪费资源）
+    BUILD_GENERATOR:  'BUILD_GENERATOR',   // 建造自动发电机
+    BUILD_LUMBER_MILL:'BUILD_LUMBER_MILL',  // 建造自动伐木机
 };
 
 // ============ 任务详情配置 ============
@@ -118,24 +119,15 @@ const TASK_DETAILS = {
     },
     [TASK_TYPES.BUILD_FURNACE]: {
         name: '🏗️ 修建第二暖炉',
-        desc: '在宿舍B修建第二座暖炉，需多人协作',
+        desc: '在工坊修建第二座暖炉，需多人协作',
         isOutdoor: false,
         baseYield: 0,
         baseDuration: 7200,
         staminaCost: 25,
-        targetLocation: 'dorm_b_door',
+        targetLocation: 'workshop_door',
         resourceType: null,
     },
-    [TASK_TYPES.MAINTAIN_FURNACE]: {
-        name: '🔥 维护暖炉',
-        desc: '在暖炉广场为暖炉添加燃料，维持供暖',
-        isOutdoor: false,
-        baseYield: 0,
-        baseDuration: 1800,
-        staminaCost: 5,
-        targetLocation: 'furnace_plaza',
-        resourceType: null,
-    },
+    // MAINTAIN_FURNACE已移除（v4.6: 暖炉自动燃烧消耗木柴，无需人工维护）
     [TASK_TYPES.DISTRIBUTE_FOOD]: {
         name: '🍲 分配食物',
         desc: '在炊事房合理加工分配食物给全员',
@@ -178,23 +170,25 @@ const TASK_DETAILS = {
         resourceType: null, // 特殊产出在_applyTaskEffect中处理
     },
 
-    [TASK_TYPES.SET_TRAP]: {
-        name: '⚠️ 布置陷阱',
-        desc: '清璇在围墙外布置警报陷阱装置',
-        isOutdoor: true,
-        baseYield: 0,
-        baseDuration: 1800,
-        staminaCost: 10,
-        targetLocation: 'south_gate',
-        resourceType: null,
-    },
-    [TASK_TYPES.REPAIR_RADIO]: {
-        name: '📻 修理无线电',
-        desc: '清璇在工坊修理无线电台，修好后可能收到救援信号',
+    // SET_TRAP已移除（v4.6: 效果太弱不值得浪费人力）
+    // REPAIR_RADIO已移除（v4.5）
+    [TASK_TYPES.BUILD_GENERATOR]: {
+        name: '⚡ 建造自动发电机',
+        desc: '在工坊建造自动发电机，建成后自动产电24/h（消耗木柴2/h，有概率故障需维修）',
         isOutdoor: false,
         baseYield: 0,
-        baseDuration: 3600,
-        staminaCost: 8,
+        baseDuration: 14400,
+        staminaCost: 20,
+        targetLocation: 'workshop_door',
+        resourceType: null,
+    },
+    [TASK_TYPES.BUILD_LUMBER_MILL]: {
+        name: '🪵 建造自动伐木机',
+        desc: '在工坊建造自动伐木机，建成后自动产柴30/h（消耗电力3/h，有概率故障需维修）',
+        isOutdoor: false,
+        baseYield: 0,
+        baseDuration: 21600,
+        staminaCost: 25,
         targetLocation: 'workshop_door',
         resourceType: null,
     },
@@ -203,12 +197,14 @@ const TASK_DETAILS = {
 // ============ NPC专长配置（末日生存） ============
 const NPC_SPECIALTIES = {
     'zhao_chef': {
-        name: '伐木/锅炉专长',
-        desc: '砍柴×1.5、搬运×1.5、暖炉维护×2',
+        name: '伐木/搬运专长',
+        desc: '砍柴×1.5、搬运×1.5、食物采集×1.3、机器建造×1.3',
         bonuses: {
             [TASK_TYPES.COLLECT_WOOD]: 1.5,
             [TASK_TYPES.COLLECT_MATERIAL]: 1.3,
-            [TASK_TYPES.MAINTAIN_FURNACE]: 2.0,
+            [TASK_TYPES.BUILD_FURNACE]: 1.3,
+            [TASK_TYPES.BUILD_GENERATOR]: 1.3,
+            [TASK_TYPES.BUILD_LUMBER_MILL]: 1.3,
             [TASK_TYPES.COLLECT_FOOD]: 1.3,
         },
     },
@@ -219,6 +215,8 @@ const NPC_SPECIALTIES = {
             [TASK_TYPES.COLLECT_MATERIAL]: 1.5,
             [TASK_TYPES.COLLECT_FOOD]: 1.3,
             [TASK_TYPES.BUILD_FURNACE]: 1.3,
+            [TASK_TYPES.BUILD_GENERATOR]: 1.2,
+            [TASK_TYPES.BUILD_LUMBER_MILL]: 1.2,
             [TASK_TYPES.COLLECT_WOOD]: 1.3,
         },
     },
@@ -229,16 +227,18 @@ const NPC_SPECIALTIES = {
             [TASK_TYPES.DISTRIBUTE_FOOD]: 2.0,
             [TASK_TYPES.COLLECT_FOOD]: 1.5,
             [TASK_TYPES.PREPARE_WARMTH]: 1.5,
-            [TASK_TYPES.MAINTAIN_FURNACE]: 1.2,
+            [TASK_TYPES.PREPARE_MEDICAL]: 1.2,
         },
         wasteReduction: 0.20,
     },
     'wang_teacher': {
         name: '技师/规划专长',
-        desc: '发电机维修×2、暖炉扩建×1.5、全队规划+10%',
+        desc: '发电机维修×2、暖炉扩建×1.5、机器建造×1.5、全队规划+10%',
         bonuses: {
             [TASK_TYPES.MAINTAIN_POWER]: 2.0,
             [TASK_TYPES.BUILD_FURNACE]: 1.5,
+            [TASK_TYPES.BUILD_GENERATOR]: 1.5,
+            [TASK_TYPES.BUILD_LUMBER_MILL]: 1.5,
             [TASK_TYPES.COORDINATE]: 1.5,
         },
         teamBonus: 0.1,
@@ -272,12 +272,11 @@ const NPC_SPECIALTIES = {
         },
     },
     'qing_xuan': {
-        name: '药剂/陷阱/无线电专长',
-        desc: '医疗救治×1.5、陷阱装置、无线电修理、学习他人技能×0.7',
+        name: '药剂/急救专长',
+        desc: '医疗救治×1.5、草药制剂×1.3、学习他人技能×0.7',
         bonuses: {
             [TASK_TYPES.PREPARE_MEDICAL]: 1.5,
-            [TASK_TYPES.SET_TRAP]: 1.5,
-            [TASK_TYPES.REPAIR_RADIO]: 1.5,
+            [TASK_TYPES.BOOST_MORALE]: 1.1,
         },
         learnMultiplier: 0.7,
     },
@@ -440,6 +439,7 @@ class TaskSystem {
 
         // 分配任务给NPC
         this._assignTasks(aliveNpcs);
+        this._activateDailyTaskNavigation(aliveNpcs);  // 驱动NPC走向任务目标
 
         // 【轮回系统】未使用workPlan时才走旧的优化路径
         if (!usedWorkPlan) {
@@ -480,34 +480,7 @@ class TaskSystem {
             }
             this.game.addEvent(`📋━━━ 共${this.dailyTasks.length}项任务，${aliveNpcs.length}人存活 ━━━\n`);
 
-            // 向右侧「决策动态」面板写入每日分工汇总卡片
-            const chatLogEl = document.getElementById('chat-log-content');
-            if (chatLogEl) {
-                const nameMap2 = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
-                const roleEmoji2 = { zhao_chef: '👨‍🍳', lu_chen: '💪', li_shen: '👩‍🍳', wang_teacher: '👨‍🏫', old_qian: '👴', su_doctor: '👨‍⚕️', ling_yue: '🔍', qing_xuan: '🧪' };
-                let planHTML = `<div class="decision-card" style="border-left:3px solid #a78bfa; margin:8px 4px; padding:8px 10px; background:rgba(40,30,80,0.8); border-radius:6px; font-size:12px; line-height:1.6;">`;
-                planHTML += `<div style="font-weight:bold; color:#c4b5fd; font-size:13px; margin-bottom:4px;">📋 第${day}天分工方案</div>`;
-                const tasksByNpc2 = {};
-                for (const task of this.dailyTasks) {
-                    const npcId = task.assignedNpcId || 'unassigned';
-                    if (!tasksByNpc2[npcId]) tasksByNpc2[npcId] = [];
-                    tasksByNpc2[npcId].push(task);
-                }
-                for (const [npcId, tasks] of Object.entries(tasksByNpc2)) {
-                    if (npcId === 'unassigned') continue;
-                    const name = nameMap2[npcId] || npcId;
-                    const em = roleEmoji2[npcId] || '👤';
-                    const taskStr = tasks.map(t => t.name).join('+');
-                    const npc = aliveNpcs.find(n => n.id === npcId);
-                    const stBar = npc ? `<span style="color:#6b7280; font-size:10px;"> 体力${Math.round(npc.stamina)}</span>` : '';
-                    planHTML += `<div style="color:#e2e8f0;">${em} <b>${name}</b>: <span style="color:#fbbf24;">${taskStr}</span>${stBar}</div>`;
-                }
-                planHTML += `</div>`;
-                const planCard = document.createElement('div');
-                planCard.innerHTML = planHTML;
-                chatLogEl.appendChild(planCard.firstElementChild);
-                chatLogEl.scrollTop = chatLogEl.scrollHeight;
-            }
+            // 【v4.16】分工方案已由右上角常驻面板(#work-plan-panel)实时显示，不再写入决策动态面板
         }
 
         console.log(`[TaskSystem] 第${day}天任务生成:`, this.dailyTasks.map(t => `${t.name}→${t.assignedNpcId}`));
@@ -524,7 +497,9 @@ class TaskSystem {
         // 物资管理+分配食物 — 李婶
         this._addTask(TASK_TYPES.COLLECT_FOOD, 40, 'urgent', 'li_shen');
         this._addTask(TASK_TYPES.DISTRIBUTE_FOOD, 1, 'high', 'li_shen');
-        // 维护电力+暖炉方案 — 王策
+        // 建造自动发电机 — 王策（工程师优先建设自动化设施）
+        this._addTask(TASK_TYPES.BUILD_GENERATOR, 1, 'urgent', 'wang_teacher');
+        // 维护电力+暖炉方案 — 王策（建完发电机后维护）
         this._addTask(TASK_TYPES.MAINTAIN_POWER, 30, 'high', 'wang_teacher');
         // 准备医疗物资 — 苏岩
         this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'su_doctor');
@@ -534,9 +509,10 @@ class TaskSystem {
         // 废墟侦察 — 歆玥
         this._addTask(TASK_TYPES.SCOUT_RUINS, 1, 'high', 'ling_yue');
         this._addTask(TASK_TYPES.BOOST_MORALE, 1, 'normal', 'ling_yue');
-        // 医疗+陷阱 — 清璇
+        // 建造自动伐木机 — 清璇（发电机就绪后尽快建设伐木机形成循环）
+        this._addTask(TASK_TYPES.BUILD_LUMBER_MILL, 1, 'high', 'qing_xuan');
+        // 医疗 — 清璇
         this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'qing_xuan');
-        this._addTask(TASK_TYPES.SET_TRAP, 1, 'normal', 'qing_xuan');
         // 准备御寒
         this._addTask(TASK_TYPES.PREPARE_WARMTH, 1, 'normal', 'li_shen');
     }
@@ -555,13 +531,13 @@ class TaskSystem {
             this._addTask(TASK_TYPES.COLLECT_FOOD, Math.min(20, foodNeeded), 'high', 'lu_chen');
         }
 
-        // 维护暖炉 — 赵铁柱(室内)
-        this._addTask(TASK_TYPES.MAINTAIN_FURNACE, 1, 'urgent', 'zhao_chef');
+        // 室内搬运木柴 — 赵铁柱(室内协助)
+        this._addTask(TASK_TYPES.PREPARE_WARMTH, 1, 'urgent', 'zhao_chef');
         // 维护电力 — 王策
         this._addTask(TASK_TYPES.MAINTAIN_POWER, 20, 'high', 'wang_teacher');
         // 分配食物 — 李婶
         this._addTask(TASK_TYPES.DISTRIBUTE_FOOD, 1, 'urgent', 'li_shen');
-        this._addTask(TASK_TYPES.MAINTAIN_FURNACE, 1, 'high', 'li_shen');
+        this._addTask(TASK_TYPES.PREPARE_WARMTH, 1, 'high', 'li_shen');
         // 医疗待命 — 苏岩
         this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'urgent', 'su_doctor');
         // 安抚情绪 — 老钱
@@ -571,7 +547,6 @@ class TaskSystem {
         this._addTask(TASK_TYPES.BOOST_MORALE, 1, 'high', 'ling_yue');
         // 医疗+无线电 — 清璇
         this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'qing_xuan');
-        this._addTask(TASK_TYPES.REPAIR_RADIO, 1, 'normal', 'qing_xuan');
     }
 
     /** 第3天（0°C喘息日）任务 — 重点修建第二暖炉 */
@@ -630,18 +605,17 @@ class TaskSystem {
         // 最后一次侦察 — 歆玥
         this._addTask(TASK_TYPES.SCOUT_RUINS, 1, 'high', 'ling_yue');
         this._addTask(TASK_TYPES.BOOST_MORALE, 1, 'normal', 'ling_yue');
-        // 赶工无线电+医疗 — 清璇
-        this._addTask(TASK_TYPES.REPAIR_RADIO, 1, 'urgent', 'qing_xuan');
-        this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'qing_xuan');
+        // 医疗 — 清璇
+        this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'urgent', 'qing_xuan');
     }
 
     /** 第4天（-60°C大极寒）任务 — 全部室内 */
     _generateDay4Tasks(rs, fs, npcs) {
         // 严禁外出！所有任务均为室内
 
-        // 维护暖炉燃料 — 赵铁柱+陆辰
-        this._addTask(TASK_TYPES.MAINTAIN_FURNACE, 1, 'urgent', 'zhao_chef');
-        this._addTask(TASK_TYPES.MAINTAIN_FURNACE, 1, 'urgent', 'lu_chen');
+        // 室内准备御寒 — 赵铁柱+陆辰
+        this._addTask(TASK_TYPES.PREPARE_WARMTH, 1, 'urgent', 'zhao_chef');
+        this._addTask(TASK_TYPES.PREPARE_WARMTH, 1, 'urgent', 'lu_chen');
         // 分配食物 — 李婶
         this._addTask(TASK_TYPES.DISTRIBUTE_FOOD, 1, 'urgent', 'li_shen');
         // 维护电力 — 王策
@@ -799,11 +773,11 @@ class TaskSystem {
             if (!npc) continue;
 
             task.status = 'failed';
-            const newTaskId = this._addTask(TASK_TYPES.MAINTAIN_FURNACE, 1, 'urgent', npc.id);
+            const newTaskId = this._addTask(TASK_TYPES.PREPARE_WARMTH, 1, 'urgent', npc.id);
             this.npcAssignments[npc.id] = newTaskId;
 
             if (this.game.addEvent) {
-                this.game.addEvent(`🌨️ 暴风雪！${npc.name}的户外任务「${task.name}」已取消，转为室内维护暖炉`);
+                this.game.addEvent(`🌨️ 暴风雪！${npc.name}的户外任务「${task.name}」已取消，转为室内准备御寒物资`);
             }
         }
 
@@ -858,6 +832,28 @@ class TaskSystem {
                     this.npcAssignments[task.assignedNpcId] = task.id;
                 }
             }
+        }
+    }
+
+    /**
+     * 将每日任务分配转化为NPC导航指令
+     * 桥接 _assignTasks（静态映射）与 NPC 物理移动
+     * Council 投票结果会在之后覆盖（后调用的 activateTaskOverride 替换前一个）
+     */
+    _activateDailyTaskNavigation(aliveNpcs) {
+        for (const npc of aliveNpcs) {
+            const taskId = this.npcAssignments[npc.id];
+            if (!taskId) continue;
+            const task = this.dailyTasks.find(t => t.id === taskId);
+            if (!task || task.status === 'completed') continue;
+            const detail = TASK_DETAILS[task.type];
+            if (!detail || !detail.targetLocation) continue;
+            // 不覆盖已有的 active taskOverride（council决议优先）
+            if (npc._taskOverride && npc._taskOverride.isActive) continue;
+            // 体力/健康过低的NPC不派出去
+            if (npc.stamina < 30 || npc.health < 30) continue;
+            npc.activateTaskOverride(taskId, detail.targetLocation, task.priority || 'normal', detail.resourceType || null, detail.name);
+            console.log(`[TaskSystem] 每日任务导航：${npc.name} → ${detail.name} → ${detail.targetLocation}`);
         }
     }
 
@@ -994,7 +990,10 @@ class TaskSystem {
             task.startTime = Date.now();
         }
 
-        // 【修复】任务效果位置校验：NPC必须在任务指定的正确场景才能产出
+        // 【修复v4.4.2】任务效果位置校验：NPC必须在任务指定的正确场景才能产出
+        // 【Bug修复】_door类型目标在SCHEDULE_LOCATIONS中scene='village'（门口坐标），
+        // NPC导航到门口后在village场景，但之前的校验要求NPC在室内场景，导致
+        // BUILD_FURNACE等_door类目标任务永远无法执行（NPC站门口但校验要求在室内）
         const taskDetail = TASK_DETAILS[task.type];
         if (taskDetail && taskDetail.targetLocation) {
             const doorToScene = {
@@ -1004,12 +1003,17 @@ class TaskSystem {
             };
             const tLoc = taskDetail.targetLocation;
             const isDoor = tLoc.endsWith('_door');
-            // _door类型任务：NPC必须在对应室内场景
-            // 户外类型任务：NPC必须在village场景
-            const requiredScene = isDoor ? doorToScene[tLoc] : 'village';
-            if (requiredScene && npc.currentScene !== requiredScene) {
-                // NPC不在正确位置，不产出但也不暂停（让NPC导航系统去纠正）
-                return;
+            if (isDoor) {
+                // _door类型任务：NPC在门口(village)或已进入对应室内场景都算到达
+                const indoorScene = doorToScene[tLoc];
+                if (npc.currentScene !== 'village' && npc.currentScene !== indoorScene) {
+                    return;
+                }
+            } else {
+                // 非_door类型（户外采集点等）：NPC必须在village场景
+                if (npc.currentScene !== 'village') {
+                    return;
+                }
             }
         }
 
@@ -1158,17 +1162,23 @@ class TaskSystem {
                 }
                 break;
             }
-            case TASK_TYPES.MAINTAIN_FURNACE: {
-                // 维护暖炉：标记维护状态，降低木柴消耗5%
-                this.game._furnaceMaintained = true;
-                // 暖炉维护效果：维护中全员体温恢复微量加成
-                const nearFurnaceNpcs = aliveNpcs.filter(n => {
-                    const fSys = this.game.furnaceSystem;
-                    return fSys && fSys.isNearActiveFurnace(n);
-                });
-                for (const other of nearFurnaceNpcs) {
-                    if (other.bodyTemp !== undefined && other.bodyTemp < 36.5) {
-                        other.bodyTemp = Math.min(36.5, other.bodyTemp + 0.001 * efficiency * dt);
+            // MAINTAIN_FURNACE已移除（v4.6）
+            case TASK_TYPES.BUILD_GENERATOR:
+            case TASK_TYPES.BUILD_LUMBER_MILL: {
+                // 建造自动化机器：通知MachineSystem
+                const ms = this.game.machineSystem;
+                if (ms) {
+                    const machineType = task.type === TASK_TYPES.BUILD_GENERATOR ? 'generator' : 'lumberMill';
+                    const machine = ms[machineType];
+                    if (machine && !machine.built) {
+                        const builders = this.dailyTasks
+                            .filter(t => t.type === task.type && t.assignedNpcId)
+                            .map(t => t.assignedNpcId);
+                        if (!machine.building) {
+                            ms.startBuild(machineType, builders);
+                        } else {
+                            machine.buildWorkers = builders;
+                        }
                     }
                 }
                 break;
@@ -1204,45 +1214,8 @@ class TaskSystem {
                 break;
             }
             // CRAFT_MEDICINE已合并到PREPARE_MEDICAL
-            case TASK_TYPES.SET_TRAP: {
-                // 清璇布置陷阱：完成后激活预警系统
-                // 进度在task.progress中累积，完成时触发效果
-                if (task.progress >= task.target && !this.game._trapSetup) {
-                    this.game._trapSetup = true;
-                    this.game._trapBonusActive = true;
-                    if (this.game.addEvent) {
-                        this.game.addEvent(`⚠️ ${npc.name}在围墙外布置了警报陷阱！夜间安全性提升，全员San+5`);
-                    }
-                    // 全员San恢复
-                    for (const other of aliveNpcs) {
-                        other.sanity = Math.min(100, other.sanity + 5);
-                    }
-                }
-                break;
-            }
-            case TASK_TYPES.REPAIR_RADIO: {
-                // 清璇修理无线电：追踪修理进度，完成后第4天可请求救援
-                if (this.game._radioRepaired) break;
-                if (!this.game._radioRepairProgress) this.game._radioRepairProgress = 0;
-                const repairRate = efficiency;
-                this.game._radioRepairProgress += (dt / 14400) * repairRate; // 14400秒(4游戏小时)完成
-                // 每25%进度报告一次
-                const prevPct = Math.floor((this.game._radioRepairProgress - (dt / 14400) * repairRate) * 4);
-                const curPct = Math.floor(this.game._radioRepairProgress * 4);
-                if (curPct > prevPct && this.game._radioRepairProgress < 1) {
-                    if (this.game.addEvent) {
-                        this.game.addEvent(`📻 无线电修理进度：${Math.round(this.game._radioRepairProgress * 100)}%`);
-                    }
-                }
-                if (this.game._radioRepairProgress >= 1) {
-                    this.game._radioRepairProgress = 1;
-                    this.game._radioRepaired = true;
-                    if (this.game.addEvent) {
-                        this.game.addEvent(`📻🎉 ${npc.name}修好了无线电！第4天可以尝试向外界求救（生存概率+20%）！`);
-                    }
-                }
-                break;
-            }
+            // SET_TRAP已移除（v4.6）
+            // REPAIR_RADIO已移除（v4.5）
             case TASK_TYPES.DISTRIBUTE_FOOD: {
                 // 李婶分配食物：完成后全员饱腹恢复+触发进餐事件
                 if (task.progress >= task.target && !task._foodDistributed) {
@@ -1768,10 +1741,11 @@ class TaskSystem {
         const urgency = rs.getResourceUrgency();
         const aliveNpcs = this.game.npcs.filter(n => !n.isDead);
 
-        // 检测各资源是否有NPC正在采集
+        // 检测各资源是否有NPC正在采集（包括暂停中的任务，避免反复分配）
         const activeGatherers = {};
         for (const npc of aliveNpcs) {
-            if (npc._taskOverride && npc._taskOverride.isActive && npc._taskOverride.resourceType) {
+            if (npc._taskOverride && npc._taskOverride.resourceType) {
+                // 只要taskOverride有resourceType，无论isActive还是暂停中，都算已分配
                 const rt = npc._taskOverride.resourceType;
                 if (!activeGatherers[rt]) activeGatherers[rt] = [];
                 activeGatherers[rt].push(npc.id);
@@ -1798,7 +1772,8 @@ urgentNeeds.push({ resourceType: 'food', taskType: TASK_TYPES.COLLECT_FOOD, targ
             const candidates = aliveNpcs.filter(npc => {
                 if (npc.isDead || npc.isSleeping) return false;
                 if (npc.stamina < 30 || npc.health < 30) return false;
-                if (npc._taskOverride && npc._taskOverride.isActive) return false;
+                // 【v4.17修复】有taskOverride（无论active还是暂停）的NPC都不再分配
+                if (npc._taskOverride && (npc._taskOverride.isActive || npc._taskOverride.taskId)) return false;
                 if (npc._behaviorPriority === 'P0') return false;
                 // 第2天户外限制
                 if (currentDay === 2 && need.taskType !== TASK_TYPES.MAINTAIN_POWER && npc._outdoorTimer > 100) return false;
@@ -1828,19 +1803,26 @@ urgentNeeds.push({ resourceType: 'food', taskType: TASK_TYPES.COLLECT_FOOD, targ
             const assignCount = need.maxWorkers - currentGatherers.length;
             for (let i = 0; i < Math.min(assignCount, candidates.length); i++) {
                 const npc = candidates[i];
-                npc.activateTaskOverride(
+                const activated = npc.activateTaskOverride(
                     `urgent_${need.resourceType}_${Date.now()}`,
                     need.targetLocation,
                     'urgent',
                     need.resourceType
                 );
 
-                if (this.game.addEvent) {
-                    const resourceNames = { woodFuel: '砍柴', food: '采集食物', power: '维护电力' };
-                    const spec = NPC_SPECIALTIES[npc.id];
-                    const mult = (spec && spec.bonuses && spec.bonuses[need.taskType]) || 1.0;
-                    const multTag = mult > 1.0 ? `(专长×${mult})` : '';
-                    this.game.addEvent(`🚨 资源紧急！${npc.name}${multTag}被自动分配前往${resourceNames[need.resourceType]}！`);
+                // 【v4.17】只在任务成功激活时才发消息，且60秒内同NPC同资源不重复
+                if (activated && this.game.addEvent) {
+                    if (!this._urgencyMsgCooldown) this._urgencyMsgCooldown = {};
+                    const cooldownKey = `${npc.id}_${need.resourceType}`;
+                    const now = Date.now();
+                    if (!this._urgencyMsgCooldown[cooldownKey] || now - this._urgencyMsgCooldown[cooldownKey] > 60000) {
+                        this._urgencyMsgCooldown[cooldownKey] = now;
+                        const resourceNames = { woodFuel: '砍柴', food: '采集食物', power: '维护电力' };
+                        const spec = NPC_SPECIALTIES[npc.id];
+                        const mult = (spec && spec.bonuses && spec.bonuses[need.taskType]) || 1.0;
+                        const multTag = mult > 1.0 ? `(专长×${mult})` : '';
+                        this.game.addEvent(`🚨 资源紧急！${npc.name}${multTag}被自动分配前往${resourceNames[need.resourceType]}！`);
+                    }
                 }
 
                 console.log(`[TaskSystem] 紧急分配 ${npc.name} → ${need.resourceType} (${need.targetLocation})`);
@@ -1863,7 +1845,8 @@ warningNeeds.push({ resourceType: 'power', taskType: TASK_TYPES.MAINTAIN_POWER, 
             const candidates = aliveNpcs.filter(npc => {
                 if (npc.isDead || npc.isSleeping) return false;
                 if (npc.stamina < 40 || npc.health < 40) return false;
-                if (npc._taskOverride && npc._taskOverride.isActive) return false;
+                // 【v4.17修复】有taskOverride（无论active还是暂停）的NPC都不再分配
+                if (npc._taskOverride && (npc._taskOverride.isActive || npc._taskOverride.taskId)) return false;
                 if (npc._behaviorPriority === 'P0') return false;
                 if (currentDay === 2 && npc._outdoorTimer > 80) return false;
                 return true;
@@ -1900,6 +1883,156 @@ warningNeeds.push({ resourceType: 'power', taskType: TASK_TYPES.MAINTAIN_POWER, 
                 const multTag = mult > 1.0 ? `(专长×${mult})` : '';
                 this.game.addEvent(`⚠️ 资源偏低，${npc.name}${multTag}前往${resourceNames[need.resourceType]}补充物资`);
             }
+        }
+    }
+
+    /** 将营地会议分工转成正式的当日任务表（用于首日晨会） */
+    applyCouncilAssignments(proposal, options) {
+        if (!proposal || !proposal.assignments) return false;
+
+        const day = (options && options.day) || this.game.dayCount || 1;
+        const rs = this.game.resourceSystem;
+        const fs = this.game.furnaceSystem;
+        const aliveNpcs = this.game.npcs.filter(n => !n.isDead);
+        const npcByName = new Map(aliveNpcs.map(n => [n.name, n]));
+
+        this._taskGeneratedForDay = day;
+        this.dailyTasks = [];
+        this.npcAssignments = {};
+        this.npcTaskState = {};
+
+        for (const npc of aliveNpcs) {
+            if (!npc._taskOverride) continue;
+            npc._taskOverride.isActive = false;
+            npc._taskOverride.taskId = null;
+            npc._taskOverride.targetLocation = null;
+            npc._taskOverride.resourceType = null;
+            npc._taskOverride.stateDesc = null;
+            npc._taskOverride.displayDesc = null;
+            npc._taskOverride.effectKey = null;
+            npc._taskOverride.intentId = null;
+        }
+
+        for (const [name, taskText] of Object.entries(proposal.assignments)) {
+            const npc = npcByName.get(name);
+            if (!npc) continue;
+
+            const resolved = this._resolveCouncilAssignment(taskText, day, npc, rs, fs);
+            const taskId = this._addTask(resolved.type, resolved.target, resolved.priority, npc.id);
+            if (taskId) {
+                this.npcAssignments[npc.id] = taskId;
+            }
+        }
+
+        for (const npc of aliveNpcs) {
+            if (this.npcAssignments[npc.id]) continue;
+            const fallback = this._resolveCouncilAssignment('', day, npc, rs, fs);
+            const taskId = this._addTask(fallback.type, fallback.target, fallback.priority, npc.id);
+            if (taskId) {
+                this.npcAssignments[npc.id] = taskId;
+            }
+        }
+
+        this._assignTasks(aliveNpcs);
+        this._activateDailyTaskNavigation(aliveNpcs);
+
+        if (this.game.addEvent) {
+            this.game.addEvent(`🌅 晨会通过「${proposal.name || '今日分工'}」方案，第${day}天任务已重新排定`);
+
+            const lines = aliveNpcs.map(npc => {
+                const taskId = this.npcAssignments[npc.id];
+                const task = this.dailyTasks.find(t => t.id === taskId);
+                return task ? `  ${npc.name}: ${task.name}` : null;
+            }).filter(Boolean);
+
+            for (const line of lines) {
+                this.game.addEvent(line);
+            }
+        }
+
+        // 【v4.16】晨会定稿已由右上角常驻面板(#work-plan-panel)实时显示，不再写入决策动态面板
+
+        console.log(`[TaskSystem] 晨会方案已转成第${day}天正式任务:`, this.dailyTasks.map(t => `${t.name}→${t.assignedNpcId}`));
+        return true;
+    }
+
+    _resolveCouncilAssignment(taskText, day, npc, rs, fs) {
+        const text = String(taskText || '').trim();
+        const lowered = text.toLowerCase();
+        const has = (...keywords) => keywords.some(kw => lowered.includes(String(kw).toLowerCase()));
+        const calc = (type) => this._calcResourceTarget(type, rs, fs, day);
+
+        if (has('建造发电机', '自动发电', '发电机')) {
+            return { type: TASK_TYPES.BUILD_GENERATOR, target: 1, priority: 'urgent' };
+        }
+        if (has('建造伐木机', '自动伐木', '伐木机')) {
+            return { type: TASK_TYPES.BUILD_LUMBER_MILL, target: 1, priority: 'high' };
+        }
+        if (has('暖炉扩建', '修复暖炉', '扩建暖炉', '建造暖炉', '第二暖炉')) {
+            return { type: TASK_TYPES.BUILD_FURNACE, target: 1, priority: 'urgent' };
+        }
+        if (has('人工发电', '手摇发电', '手动发电', '维护电力', '电力', '接线', '电路', '供电')) {
+            return { type: TASK_TYPES.MAINTAIN_POWER, target: calc(TASK_TYPES.MAINTAIN_POWER), priority: 'high' };
+        }
+        if (has('砍柴', '伐木', '木柴', '柴火', '木头')) {
+            return { type: TASK_TYPES.COLLECT_WOOD, target: calc(TASK_TYPES.COLLECT_WOOD), priority: 'urgent' };
+        }
+        if (has('做饭', '烹饪', '炊事', '分配食物', '分食', '准备早餐', '准备晚餐')) {
+            return { type: TASK_TYPES.DISTRIBUTE_FOOD, target: 1, priority: 'high' };
+        }
+        if (has('采集食物', '食物', '捕鱼', '抓鱼', '钓鱼', '打鱼', '冰湖')) {
+            return { type: TASK_TYPES.COLLECT_FOOD, target: calc(TASK_TYPES.COLLECT_FOOD), priority: 'high' };
+        }
+        if (has('医疗', '治疗', '急救', '包扎', '药', '伤员', '心理疏导')) {
+            return { type: TASK_TYPES.PREPARE_MEDICAL, target: 1, priority: 'high' };
+        }
+        if (has('探索', '废墟', '搜索', '搜寻', '找零件', '材料', '物资')) {
+            if (has('零件', '材料', '物资')) {
+                return { type: TASK_TYPES.COLLECT_MATERIAL, target: calc(TASK_TYPES.COLLECT_MATERIAL), priority: 'high' };
+            }
+            return { type: TASK_TYPES.SCOUT_RUINS, target: 1, priority: 'high' };
+        }
+        if (has('侦察', '巡查')) {
+            return { type: TASK_TYPES.SCOUT_RUINS, target: 1, priority: 'high' };
+        }
+        if (has('安抚', '鼓舞', '士气', '安慰', '谈心')) {
+            return { type: TASK_TYPES.BOOST_MORALE, target: 1, priority: 'normal' };
+        }
+        if (has('巡逻', '守夜', '值班', '警戒', '秩序')) {
+            return { type: TASK_TYPES.MAINTAIN_ORDER, target: 1, priority: 'normal' };
+        }
+        if (has('统筹', '协调', '组织', '指挥')) {
+            return { type: TASK_TYPES.COORDINATE, target: 1, priority: 'normal' };
+        }
+        if (has('御寒', '保暖', '取暖', '准备御寒')) {
+            return { type: TASK_TYPES.PREPARE_WARMTH, target: 1, priority: 'normal' };
+        }
+        if (has('休息', '恢复', '睡觉', '养伤')) {
+            return { type: TASK_TYPES.REST_RECOVER, target: 1, priority: 'normal' };
+        }
+
+        if (npc.health < 40 || npc.stamina < 25) {
+            return { type: TASK_TYPES.REST_RECOVER, target: 1, priority: 'normal' };
+        }
+
+        switch (npc.id) {
+            case 'wang_teacher':
+                return { type: TASK_TYPES.BUILD_GENERATOR, target: 1, priority: 'urgent' };
+            case 'zhao_chef':
+                return { type: TASK_TYPES.COLLECT_WOOD, target: calc(TASK_TYPES.COLLECT_WOOD), priority: 'urgent' };
+            case 'lu_chen':
+                return { type: TASK_TYPES.COLLECT_FOOD, target: calc(TASK_TYPES.COLLECT_FOOD), priority: 'high' };
+            case 'li_shen':
+                return { type: TASK_TYPES.DISTRIBUTE_FOOD, target: 1, priority: 'high' };
+            case 'su_doctor':
+            case 'qing_xuan':
+                return { type: TASK_TYPES.PREPARE_MEDICAL, target: 1, priority: 'high' };
+            case 'ling_yue':
+                return { type: TASK_TYPES.SCOUT_RUINS, target: 1, priority: 'high' };
+            case 'old_qian':
+                return { type: TASK_TYPES.COORDINATE, target: 1, priority: 'normal' };
+            default:
+                return { type: TASK_TYPES.PREPARE_WARMTH, target: 1, priority: 'normal' };
         }
     }
 

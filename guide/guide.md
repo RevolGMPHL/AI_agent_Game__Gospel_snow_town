@@ -5,7 +5,7 @@
 **模块化体系**: GST 命名空间 + IIFE 隔离 + Mixin 模式  
 **LLM 支持**: GLM-4-Flash（云端）/ qwen3.5:4b、qwen3.5:9b via Ollama（本地，推荐）  
 **核心目标**: 8 位 AI 居民的像素风末日雪镇生存游戏，4天极寒考验，居民能自主生活、社交、工作，玩家可以观察/对话  
-**当前版本**: v4.4（模块化重构版 + 五大系统修复 + 后台运行 + P0 优先级仲裁 + 断点续玩）
+**当前版本**: v4.15（5倍速时间语义统一 + NPC安全计时器真实时间化）
 **项目路径**: `/data/project/project_revol/vibegame/20260305-gospel-snow-town`
 
 ---
@@ -22,8 +22,8 @@
 | [05-ai.md](05-ai.md) | 🤖 AI 系统 | Prompt 设计、对话系统、LLM 集成、环境感知系统 |
 | [06-tech.md](06-tech.md) | ⚙️ 技术架构 | **v4.0 重构版** — 49个模块文件、7层分类、GST命名空间、Mixin模式 |
 | [07-plan.md](07-plan.md) | 📅 开发计划 | 分期计划、待优化项 |
-| [08-changelog.md](08-changelog.md) | 📝 更新日志 | v0.1~v4.0 完整版本历史 |
-| [09-pitfalls.md](09-pitfalls.md) | 🚧 踩坑记录 | 44+ 条开发经验教训、42 条通用开发原则 |
+| [08-changelog.md](08-changelog.md) | 📝 更新日志 | v0.1~v4.15 完整版本历史 |
+| [09-pitfalls.md](09-pitfalls.md) | 🚧 踩坑记录 | 53+ 条开发经验教训、48 条通用开发原则 |
 | [10-module-testing.md](10-module-testing.md) | 🧪 模块测试方法论 | 测试工具使用、IIFE 编码规范速查、推荐工作流 |
 
 ---

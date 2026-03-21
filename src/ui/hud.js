@@ -497,32 +497,104 @@ const resp = await fetch('http://localhost:8080/api/save-debug-log', {
 
     proto._renderScheduleTab = function(npc) {
         const el = document.getElementById('tab-schedule');
-        const currentHour = this.getHour();
-        const schedule = npc.scheduleTemplate || [];
 
-        if (schedule.length === 0) {
-            el.innerHTML = '<div class="memory-empty">暂无日程安排</div>';
-            return;
+        // === 【v4.17】改为显示AI行动状态，不再显示旧的固定日程 ===
+        const stateDesc = npc.stateDesc || '待命中';
+        const action = npc._currentAction;
+        const behaviorOwner = npc._behaviorOwner || 'unknown';
+        const behaviorReason = npc._behaviorReason || '';
+        const scene = npc.currentScene || '未知';
+        const councilDesc = npc._councilStateDesc || '';
+        const taskOverride = npc._taskOverride;
+        const isMoving = npc.isMoving;
+        const isSleeping = npc.isSleeping;
+        const isEating = npc.isEating;
+
+        // 状态emoji
+        let statusEmoji = '🟢';
+        let statusText = '正常';
+        if (npc.isDead) { statusEmoji = '💀'; statusText = '已死亡'; }
+        else if (isSleeping) { statusEmoji = '😴'; statusText = '睡眠中'; }
+        else if (isEating) { statusEmoji = '🍽️'; statusText = '进食中'; }
+        else if (isMoving) { statusEmoji = '🚶'; statusText = '移动中'; }
+
+        // 行为控制方中文映射
+        const ownerMap = {
+            priority: '🔴 紧急优先级',
+            task: '📋 任务系统',
+            hunger: '🍽️ 饥饿驱动',
+            state: '⚠️ 状态紧急',
+            resource: '📦 资源巡检',
+            action: '🤖 AI行动决策',
+            schedule: '📅 日程兜底'
+        };
+        const ownerLabel = ownerMap[behaviorOwner] || behaviorOwner;
+
+        let html = '';
+
+        // 当前行动
+        html += `<div class="action-status-section">
+            <div class="action-status-title">🎯 当前行动</div>
+            <div class="action-status-main">${stateDesc}</div>
+        </div>`;
+
+        // 状态概览
+        html += `<div class="action-status-section">
+            <div class="action-status-title">📊 状态</div>
+            <div class="action-status-row">
+                <span class="action-label">状态</span>
+                <span class="action-value">${statusEmoji} ${statusText}</span>
+            </div>
+            <div class="action-status-row">
+                <span class="action-label">场景</span>
+                <span class="action-value">📍 ${scene}</span>
+            </div>
+            <div class="action-status-row">
+                <span class="action-label">控制方</span>
+                <span class="action-value">${ownerLabel}</span>
+            </div>
+        </div>`;
+
+        // 晨会分配
+        if (councilDesc) {
+            html += `<div class="action-status-section">
+                <div class="action-status-title">🗳️ 晨会分配</div>
+                <div class="action-status-main council">${councilDesc}</div>
+            </div>`;
         }
 
-        el.innerHTML = schedule.map(s => {
-            // 判断是否是当前时段
-            let isCurrent = false;
-            if (s.start < s.end) {
-                isCurrent = currentHour >= s.start && currentHour < s.end;
-            } else {
-                // 跨午夜（如 22:00 ~ 6:00）
-                isCurrent = currentHour >= s.start || currentHour < s.end;
-            }
-
-            const startStr = String(s.start).padStart(2, '0') + ':00';
-            const endStr = String(s.end).padStart(2, '0') + ':00';
-
-            return `<div class="schedule-item${isCurrent ? ' current' : ''}">
-                <span class="schedule-time">${startStr} - ${endStr}</span>
-                <span class="schedule-desc">${s.desc}</span>
+        // 任务覆盖信息
+        if (taskOverride && taskOverride.isActive) {
+            html += `<div class="action-status-section">
+                <div class="action-status-title">📌 执行任务</div>
+                <div class="action-status-main task">${taskOverride.desc || taskOverride.effectKey || '任务执行中'}</div>
             </div>`;
-        }).join('');
+        }
+
+        // 行动详情
+        if (action) {
+            html += `<div class="action-status-section">
+                <div class="action-status-title">🔧 行动详情</div>
+                <div class="action-status-row">
+                    <span class="action-label">类型</span>
+                    <span class="action-value">${action.type || '-'}</span>
+                </div>`;
+            if (action.target) {
+                html += `<div class="action-status-row">
+                    <span class="action-label">目标</span>
+                    <span class="action-value">${action.target}</span>
+                </div>`;
+            }
+            if (action.reason) {
+                html += `<div class="action-status-row">
+                    <span class="action-label">原因</span>
+                    <span class="action-value">${action.reason}</span>
+                </div>`;
+            }
+            html += `</div>`;
+        }
+
+        el.innerHTML = html;
     };
 
     proto._setupNPCDetailPanel = function() {
@@ -872,6 +944,135 @@ const resp = await fetch('http://localhost:8080/api/save-debug-log', {
                 this._medkitLastWarnTime = 0;
             }
         }
+        // ============ 自动化机器状态更新 ============
+        if (this.machineSystem) {
+            const ms = this.machineSystem;
+            const cfg = GST.MACHINE_CONFIG;
+            const canUnlockGen = ms.canUnlockGenerator();
+            const canUnlockLum = ms.canUnlockLumberMill();
+
+            // --- 发电机 ---
+            const genBar = document.getElementById('machine-generator-bar');
+            const genFill = document.getElementById('machine-generator-fill');
+            const genVal = document.getElementById('machine-generator-val');
+            const showGen = ms.shouldShowGenerator ? ms.shouldShowGenerator() : (ms.generator.built || ms.generator.building || canUnlockGen);
+            if (genBar) genBar.style.display = showGen ? '' : 'none';
+            if (showGen && genFill && genVal) {
+                if (ms.generator.building) {
+                    // 建造中 — 进度条显示建造进度
+                    const pct = Math.round(ms.generator.buildProgress * 100);
+                    genFill.style.width = `${Math.max(pct, 3)}%`; // 最小3%宽度，确保可见
+                    genFill.style.background = 'linear-gradient(90deg, #f59e0b, #fbbf24)';
+                    genFill.classList.add('building');
+                    genVal.textContent = `🔨${pct}% (${ms.generator.buildWorkers.length}人)`;
+                    genVal.style.color = '#fbbf24';
+                    genVal.classList.add('building-text');
+                    genBar.title = `⚡ 自动发电机建造中 ${pct}%\n工人: ${ms.generator.buildWorkers.length}人${ms.generator.buildPaused ? '\n⏸️ 已暂停（木柴不足）' : ''}`;
+                } else if (ms.generator.built) {
+                    // 已建成 — 进度条满格，显示效率
+                    genFill.style.width = '100%';
+                    genFill.classList.remove('building');
+                    genVal.classList.remove('building-text');
+                    if (ms.generator.broken) {
+                        genFill.style.background = 'linear-gradient(90deg, #dc2626, #f87171)';
+                        const repairPct = Math.round((ms.generator._repairProgress || 0) * 100);
+                        genVal.textContent = repairPct > 0 ? `🔧故障 修${repairPct}%` : '🔧故障!';
+                        genVal.style.color = '#f87171';
+                        genVal.classList.add('building-text');
+                        genBar.title = `⚡ 自动发电机故障停机！\n维修进度: ${repairPct}%\n需要NPC在工坊维修\n累计产电: ${Math.round(ms.generator.totalProduced)}`;
+                    } else if (ms.generator.running) {
+                        genFill.style.background = 'linear-gradient(90deg, #4A90D9, #68B8FF)';
+                        const c = cfg.generator;
+                        genVal.textContent = `+${c.powerOutputPerHour}⚡/h`;
+                        genVal.style.color = '#34d399';
+                        genBar.title = `⚡ 自动发电机运行中\n产出: 电力 +${c.powerOutputPerHour}/h\n消耗: 木柴 -${c.woodConsumptionPerHour}/h\n累计产电: ${Math.round(ms.generator.totalProduced)}\n累计耗柴: ${Math.round(ms.generator.totalConsumed)}`;
+                    } else {
+                        genFill.style.background = 'linear-gradient(90deg, #6b7280, #9ca3af)';
+                        genVal.textContent = '停机';
+                        genVal.style.color = '#f87171';
+                        genBar.title = `⚡ 自动发电机已停机\n原因: 木柴不足（<${cfg.generator.minWoodToRun}）\n累计产电: ${Math.round(ms.generator.totalProduced)}`;
+                    }
+                } else if (canUnlockGen) {
+                    // 已解锁但未建造 — 显示待建造状态
+                    genFill.style.width = '0%';
+                    genFill.style.background = 'linear-gradient(90deg, #6b7280, #9ca3af)';
+                    genFill.classList.remove('building');
+                    genVal.textContent = '待建造';
+                    genVal.style.color = '#a78bfa';
+                    genVal.classList.remove('building-text');
+                    genBar.title = `⚡ 自动发电机已解锁\n建造需要: 电力${cfg.generator.buildMaterialCost} + 木柴${cfg.generator.buildWoodCost}\n建造时间: ${cfg.generator.buildTimeSeconds / 3600}小时\n建成后: 产电${cfg.generator.powerOutputPerHour}/h，耗柴${cfg.generator.woodConsumptionPerHour}/h`;
+                } else {
+                    // 未解锁 — 灰色显示
+                    genFill.style.width = '0%';
+                    genFill.style.background = 'linear-gradient(90deg, #374151, #4b5563)';
+                    genFill.classList.remove('building');
+                    genVal.textContent = '🔒未解锁';
+                    genVal.style.color = '#6b7280';
+                    genVal.classList.remove('building-text');
+                    genBar.title = `⚡ 自动发电机未解锁\n解锁条件: 电力>${cfg.generator.buildUnlockPower}（当前${Math.round(this.resourceSystem?.power || 0)}）\n建造需要: 电力${cfg.generator.buildMaterialCost} + 木柴${cfg.generator.buildWoodCost}`;
+                }
+            }
+
+            // --- 伐木机 ---
+            const lumBar = document.getElementById('machine-lumber-bar');
+            const lumFill = document.getElementById('machine-lumber-fill');
+            const lumVal = document.getElementById('machine-lumber-val');
+            const showLum = ms.shouldShowLumberMill ? ms.shouldShowLumberMill() : (ms.lumberMill.built || ms.lumberMill.building || canUnlockLum);
+            if (lumBar) lumBar.style.display = showLum ? '' : 'none';
+            if (showLum && lumFill && lumVal) {
+                if (ms.lumberMill.building) {
+                    const pct = Math.round(ms.lumberMill.buildProgress * 100);
+                    lumFill.style.width = `${Math.max(pct, 3)}%`; // 最小3%宽度，确保可见
+                    lumFill.style.background = 'linear-gradient(90deg, #f59e0b, #fbbf24)';
+                    lumFill.classList.add('building');
+                    lumVal.textContent = `🔨${pct}% (${ms.lumberMill.buildWorkers.length}人)`;
+                    lumVal.style.color = '#fbbf24';
+                    lumVal.classList.add('building-text');
+                    lumBar.title = `🪵 自动伐木机建造中 ${pct}%\n工人: ${ms.lumberMill.buildWorkers.length}人${ms.lumberMill.buildPaused ? '\n⏸️ 已暂停（木柴不足）' : ''}`;
+                } else if (ms.lumberMill.built) {
+                    lumFill.style.width = '100%';
+                    lumFill.classList.remove('building');
+                    lumVal.classList.remove('building-text');
+                    if (ms.lumberMill.broken) {
+                        lumFill.style.background = 'linear-gradient(90deg, #dc2626, #f87171)';
+                        const repairPct = Math.round((ms.lumberMill._repairProgress || 0) * 100);
+                        lumVal.textContent = repairPct > 0 ? `🔧故障 修${repairPct}%` : '🔧故障!';
+                        lumVal.style.color = '#f87171';
+                        lumVal.classList.add('building-text');
+                        lumBar.title = `🪵 自动伐木机故障停机！\n维修进度: ${repairPct}%\n需要NPC在工坊维修\n累计产柴: ${Math.round(ms.lumberMill.totalProduced)}`;
+                    } else if (ms.lumberMill.running) {
+                        lumFill.style.background = 'linear-gradient(90deg, #8B5E3C, #C4863C)';
+                        const c = cfg.lumberMill;
+                        lumVal.textContent = `+${c.woodOutputPerHour}🪵/h`;
+                        lumVal.style.color = '#34d399';
+                        lumBar.title = `🪵 自动伐木机运行中\n产出: 木柴 +${c.woodOutputPerHour}/h\n消耗: 电力 -${c.powerConsumptionPerHour}/h\n累计产柴: ${Math.round(ms.lumberMill.totalProduced)}\n累计耗电: ${Math.round(ms.lumberMill.totalConsumed)}`;
+                    } else {
+                        lumFill.style.background = 'linear-gradient(90deg, #6b7280, #9ca3af)';
+                        lumVal.textContent = '停机';
+                        lumVal.style.color = '#f87171';
+                        lumBar.title = `🪵 自动伐木机已停机\n原因: 电力不足（<${cfg.lumberMill.minPowerToRun}）\n累计产柴: ${Math.round(ms.lumberMill.totalProduced)}`;
+                    }
+                } else if (canUnlockLum) {
+                    // 已解锁但未建造 — 显示待建造状态
+                    lumFill.style.width = '0%';
+                    lumFill.style.background = 'linear-gradient(90deg, #6b7280, #9ca3af)';
+                    lumFill.classList.remove('building');
+                    lumVal.textContent = '待建造';
+                    lumVal.style.color = '#a78bfa';
+                    lumVal.classList.remove('building-text');
+                    lumBar.title = `🪵 自动伐木机已解锁\n建造需要: 电力${cfg.lumberMill.buildMaterialCost} + 木柴${cfg.lumberMill.buildWoodCost}\n建造时间: ${cfg.lumberMill.buildTimeSeconds / 3600}小时\n建成后: 产柴${cfg.lumberMill.woodOutputPerHour}/h，耗电${cfg.lumberMill.powerConsumptionPerHour}/h`;
+                } else {
+                    // 未解锁 — 灰色显示
+                    lumFill.style.width = '0%';
+                    lumFill.style.background = 'linear-gradient(90deg, #374151, #4b5563)';
+                    lumFill.classList.remove('building');
+                    lumVal.textContent = '🔒未解锁';
+                    lumVal.style.color = '#6b7280';
+                    lumVal.classList.remove('building-text');
+                    lumBar.title = `🪵 自动伐木机未解锁\n解锁条件: 木柴>${cfg.lumberMill.buildUnlockWood}（当前${Math.round(this.resourceSystem?.woodFuel || 0)}）\n建造需要: 电力${cfg.lumberMill.buildMaterialCost} + 木柴${cfg.lumberMill.buildWoodCost}`;
+                }
+            }
+        }
         if (this.taskSystem) {
             const taskEl = document.getElementById('task-progress-val');
             if (taskEl) taskEl.textContent = this.taskSystem.getTaskSummaryForPrompt();
@@ -925,9 +1126,324 @@ const resp = await fetch('http://localhost:8080/api/save-debug-log', {
                 cardEl.classList.toggle('active', this.followTarget === npc);
             }
         }
+
+        // 决策分工对比面板
+        this._updateCouncilPanel();
+
+        // 【v4.16】右上角常驻分工方案面板
+        this._updateWorkPlanPanel();
     }
 
+    // ---- 决策分工对比面板 ----
+    proto._updateCouncilPanel = function() {
+        const panel = document.getElementById('council-decision-panel');
+        if (!panel) return;
+
+        const cs = this.councilSystem;
+        if (!cs || !cs._winnerProposal || !cs._winnerProposal.assignments) {
+            panel.classList.add('hidden');
+            return;
+        }
+
+        // 检查是否所有 council 任务都已过期
+        const hasActive = this.npcs.some(n => n._councilTask);
+        if (!hasActive) {
+            panel.classList.add('hidden');
+            return;
+        }
+
+        const proposal = cs._winnerProposal;
+        const assignments = proposal.assignments;
+        const rows = [];
+
+        // 先渲染被分配任务的 NPC
+        const assignedNames = new Set(Object.keys(assignments));
+        for (const [name, task] of Object.entries(assignments)) {
+            const npc = this.npcs.find(n => n.name === name);
+            if (!npc) continue;
+
+            const planned = npc._councilStateDesc || task;
+            const actual = npc.stateDesc || npc.state || '—';
+            const icon = this._councilStatusIcon(npc, planned, actual);
+
+            // 根据状态选择actual的显示颜色
+            let actualStyle = '';
+            if (icon === '🔄') actualStyle = 'color:#4ade80';     // 绿色=执行中
+            else if (icon === '⏳') actualStyle = 'color:#facc15'; // 黄色=途中
+            else if (icon === '📋') actualStyle = 'color:#94a3b8'; // 灰色=待执行
+
+            rows.push(
+                `<div class="cdp-row">` +
+                `<span class="cdp-icon">${icon}</span>` +
+                `<span class="cdp-name">${name}</span>` +
+                `<span class="cdp-plan" title="计划: ${task}">${planned}</span>` +
+                `<span class="cdp-arrow">→</span>` +
+                `<span class="cdp-actual" title="实际: ${actual}" style="${actualStyle}">${actual}</span>` +
+                `</div>`
+            );
+        }
+
+        // 补充未被分配的存活 NPC（兜底 — 动态补入 assignments，不应出现"自行安排"）
+        const ROLE_DEFAULTS = {
+            'old_qian': '安抚士气', 'li_shen': '做饭', 'zhao_chef': '砍柴',
+            'su_doctor': '治疗伤员', 'wang_teacher': '人工发电', 'lu_chen': '砍柴',
+            'ling_yue': '探索废墟', 'qing_xuan': '治疗伤员',
+        };
+        for (const npc of this.npcs) {
+            if (npc.isDead || assignedNames.has(npc.name)) continue;
+            // 动态补入 winner 方案
+            const fallbackTask = ROLE_DEFAULTS[npc.id] || '休息恢复';
+            assignments[npc.name] = fallbackTask;
+
+            const planned = npc._councilStateDesc || fallbackTask;
+            const actual = npc.stateDesc || npc.state || '—';
+            const icon = this._councilStatusIcon(npc, planned, actual);
+            let actualStyle = '';
+            if (icon === '🔄') actualStyle = 'color:#4ade80';
+            else if (icon === '⏳') actualStyle = 'color:#facc15';
+            else if (icon === '📋') actualStyle = 'color:#94a3b8';
+            rows.push(
+                `<div class="cdp-row">` +
+                `<span class="cdp-icon">${icon}</span>` +
+                `<span class="cdp-name">${npc.name}</span>` +
+                `<span class="cdp-plan" title="计划: ${fallbackTask}">${planned}</span>` +
+                `<span class="cdp-arrow">→</span>` +
+                `<span class="cdp-actual" title="实际: ${actual}" style="${actualStyle}">${actual}</span>` +
+                `</div>`
+            );
+        }
+
+        // 决策时间（取第一个有 _councilTaskTime 的NPC）
+        const tNpc = this.npcs.find(n => n._councilTaskTime);
+        const timeStr = tNpc ? new Date(tNpc._councilTaskTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
+
+        panel.innerHTML =
+            `<div class="cdp-header">` +
+            `<span class="cdp-title">📋 ${proposal.name}</span>` +
+            `<span class="cdp-time">${timeStr}</span>` +
+            `</div>` +
+            rows.join('');
+        panel.classList.remove('hidden');
+    };
+
+    proto._councilMatchCheck = function(planned, actual) {
+        if (!planned || !actual) return false;
+        const p = planned.toLowerCase();
+        const a = actual.toLowerCase();
+        const keywords = p.match(/[\u4e00-\u9fff]{2,}|[a-z]{3,}/g);
+        if (!keywords) return false;
+        return keywords.some(kw => a.includes(kw));
+    };
+
+    proto._councilStatusIcon = function(npc, planned, actual) {
+        if (npc.isDead) return '💀';
+        if (npc.isSleeping) return '💤';
+        if (npc.state === 'eating' || (actual && actual.includes('吃'))) return '🍜';
+        if (npc.state === 'healing' || npc.isInTherapy) return '💊';
+        if (planned && actual && this._councilMatchCheck(planned, actual)) {
+            // 在目标位置执行中
+            if (npc.isMoving || npc._walkingToDoor) return '⏳'; // 虽然匹配但还在移动
+            return '🔄'; // 正在执行
+        }
+        if (npc.isMoving || npc._walkingToDoor) return '⏳'; // 途中
+        return '📋'; // 待执行/尚未匹配
+    };
+
     /** 资源条更新辅助 */;
+
+    // ====== 【v4.16】右上角常驻分工方案面板 ======
+
+    proto._initWorkPlanPanel = function() {
+        const toggleBtn = document.getElementById('wpp-toggle');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                const panel = document.getElementById('work-plan-panel');
+                if (panel) panel.classList.toggle('collapsed');
+            });
+        }
+    };
+
+    /**
+     * 每帧更新右上角分工方案面板
+     * 数据来源优先级：
+     * 1. TaskSystem.dailyTasks（当天正式任务）
+     * 2. CouncilSystem._winnerProposal（晨会投票结果）
+     * 3. WorkPlan（轮回建议稿）
+     */
+    proto._updateWorkPlanPanel = function() {
+        const panel = document.getElementById('work-plan-panel');
+        if (!panel) return;
+
+        // 首次调用时自动初始化折叠按钮事件
+        if (!this._wppInitialized) {
+            this._wppInitialized = true;
+            this._initWorkPlanPanel();
+        }
+
+        // 节流：每1秒更新一次DOM（分工方案不需要每帧刷新）
+        const now = Date.now();
+        if (this._wppLastUpdate && now - this._wppLastUpdate < 1000) return;
+        this._wppLastUpdate = now;
+
+        const body = document.getElementById('wpp-body');
+        const timeEl = document.getElementById('wpp-time');
+        if (!body) return;
+
+        const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
+        const roleEmoji = { zhao_chef: '👨‍🍳', lu_chen: '💪', li_shen: '👩‍🍳', wang_teacher: '👨‍🏫', old_qian: '👴', su_doctor: '👨‍⚕️', ling_yue: '🔍', qing_xuan: '🧪' };
+
+        // 时间显示
+        if (timeEl) {
+            timeEl.textContent = `第${this.dayCount}天 ${this.getTimeStr()}`;
+        }
+
+        // 获取数据：优先从TaskSystem获取正式任务分工
+        const ts = this.taskSystem;
+        const cs = this.councilSystem;
+        const rs = this.reincarnationSystem;
+        const aliveNpcs = this.npcs.filter(n => !n.isDead);
+        const deadNpcs = this.npcs.filter(n => n.isDead);
+
+        let rows = [];
+        let sourceLabel = '';
+
+        // 来源1: TaskSystem正式任务
+        if (ts && ts.dailyTasks && ts.dailyTasks.length > 0) {
+            sourceLabel = '📋 今日任务分工';
+            const completed = ts.dailyTasks.filter(t => t.status === 'completed').length;
+            const total = ts.dailyTasks.length;
+            sourceLabel += ` (${completed}/${total}完成)`;
+
+            // 按NPC分组
+            const tasksByNpc = {};
+            for (const task of ts.dailyTasks) {
+                const npcId = task.assignedNpcId || 'unassigned';
+                if (!tasksByNpc[npcId]) tasksByNpc[npcId] = [];
+                tasksByNpc[npcId].push(task);
+            }
+
+            for (const npc of this.npcs) {
+                const tasks = tasksByNpc[npc.id];
+                if (!tasks) continue;
+                const taskStr = tasks.map(t => {
+                    const progress = t.target > 0 ? Math.min(100, Math.round(t.progress / t.target * 100)) : (t.status === 'completed' ? 100 : 0);
+                    const statusMark = t.status === 'completed' ? '✅' : (progress > 0 ? `${progress}%` : '');
+                    return t.name + (statusMark ? `(${statusMark})` : '');
+                }).join('+');
+
+                const actual = npc.stateDesc || npc.state || '—';
+                let statusIcon = '📋';
+                if (npc.isDead) statusIcon = '💀';
+                else if (npc.isSleeping) statusIcon = '💤';
+                else if (actual.includes('砍') || actual.includes('采') || actual.includes('修') || actual.includes('探') || actual.includes('巡')) statusIcon = '🔄';
+                else if (npc.isMoving) statusIcon = '⏳';
+
+                rows.push({
+                    npcId: npc.id,
+                    name: npc.name,
+                    emoji: roleEmoji[npc.id] || '👤',
+                    task: taskStr,
+                    status: statusIcon,
+                    stamina: Math.round(npc.stamina || 0),
+                    isDead: npc.isDead,
+                    isExecuting: statusIcon === '🔄',
+                    isTraveling: statusIcon === '⏳'
+                });
+            }
+        }
+        // 来源2: CouncilSystem晨会投票结果
+        else if (cs && cs._winnerProposal && cs._winnerProposal.assignments) {
+            sourceLabel = `🗳️ 晨会决议: ${cs._winnerProposal.name || '今日方案'}`;
+            const assignments = cs._winnerProposal.assignments;
+            for (const [name, task] of Object.entries(assignments)) {
+                const npc = this.npcs.find(n => n.name === name);
+                if (!npc) continue;
+                const actual = npc.stateDesc || npc.state || '—';
+                let statusIcon = '📋';
+                if (npc.isDead) statusIcon = '💀';
+                else if (npc.isSleeping) statusIcon = '💤';
+                else if (this._councilMatchCheck && this._councilMatchCheck(task, actual)) statusIcon = '🔄';
+                else if (npc.isMoving) statusIcon = '⏳';
+
+                rows.push({
+                    npcId: npc.id,
+                    name: name,
+                    emoji: roleEmoji[npc.id] || '👤',
+                    task: npc._councilStateDesc || task,
+                    status: statusIcon,
+                    stamina: Math.round(npc.stamina || 0),
+                    isDead: npc.isDead,
+                    isExecuting: statusIcon === '🔄',
+                    isTraveling: statusIcon === '⏳'
+                });
+            }
+        }
+        // 来源3: WorkPlan轮回建议稿
+        else if (rs) {
+            const holder = rs.getWorkPlanHolder && rs.getWorkPlanHolder();
+            if (holder && holder.workPlan) {
+                const wp = holder.workPlan;
+                const day = this.dayCount || 1;
+                const dayPlan = wp.dayPlans && wp.dayPlans[day];
+                sourceLabel = `📝 建议稿 (${wp.strategy || '默认'})`;
+                if (dayPlan) {
+                    const taskShort = { COLLECT_WOOD: '收集木柴', COLLECT_FOOD: '收集食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗救治', SCOUT_RUINS: '侦察废墟', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', PREPARE_WARMTH: '御寒', MAINTAIN_ORDER: '维持秩序', DISTRIBUTE_FOOD: '分配食物', REST_RECOVER: '休息' };
+                    for (const a of dayPlan) {
+                        const npc = this.npcs.find(n => n.id === a.npcId);
+                        rows.push({
+                            npcId: a.npcId,
+                            name: nameMap[a.npcId] || a.npcId,
+                            emoji: roleEmoji[a.npcId] || '👤',
+                            task: taskShort[a.task] || a.task,
+                            status: npc && npc.isDead ? '💀' : '📋',
+                            stamina: npc ? Math.round(npc.stamina || 0) : 0,
+                            isDead: npc ? npc.isDead : false,
+                            isExecuting: false,
+                            isTraveling: false
+                        });
+                    }
+                }
+            }
+        }
+
+        // 没有任何分工数据
+        if (rows.length === 0) {
+            body.innerHTML = '<div class="wpp-empty">等待分工...</div>';
+            return;
+        }
+
+        // 添加已死亡但不在列表中的NPC
+        for (const npc of deadNpcs) {
+            if (!rows.find(r => r.npcId === npc.id)) {
+                rows.push({
+                    npcId: npc.id,
+                    name: npc.name,
+                    emoji: roleEmoji[npc.id] || '👤',
+                    task: '已死亡',
+                    status: '💀',
+                    stamina: 0,
+                    isDead: true,
+                    isExecuting: false,
+                    isTraveling: false
+                });
+            }
+        }
+
+        // 构建HTML
+        let html = `<div class="wpp-source">${sourceLabel}</div>`;
+        for (const row of rows) {
+            const cls = row.isDead ? ' dead' : (row.isExecuting ? ' executing' : (row.isTraveling ? ' traveling' : ''));
+            html += `<div class="wpp-row${cls}">`
+                + `<span class="wpp-row-icon">${row.emoji}</span>`
+                + `<span class="wpp-row-name">${row.name}</span>`
+                + `<span class="wpp-row-task" title="${row.task}">${row.task}</span>`
+                + `<span class="wpp-row-status">${row.status}</span>`
+                + `<span class="wpp-row-stamina">${row.isDead ? '' : row.stamina}</span>`
+                + `</div>`;
+        }
+
+        body.innerHTML = html;
+    };
 
     proto.addEvent = function(text) {
         const time = this.getTimeStr();

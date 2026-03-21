@@ -17,17 +17,30 @@
         const scheduleDesc = this.scheduleTemplate[schedIdx].desc || '';
         const currentDesc = this.stateDesc || scheduleDesc;
 
+        // 【投票决策保护】如果NPC有投票分配的stateDesc且未过期，优先使用它
+        const councilDesc = this._councilStateDesc || '';
+
         // 在ACTION_EFFECT_MAP中查找匹配的效果
+        // 优先使用 taskOverride 显式 effectKey，避免“建造发电机 / 人工发电”这类关键词互相串台
         // 【P0修复】同时匹配 stateDesc 和日程原始 desc，防止 LLM 行动决策覆盖 stateDesc 后关键词丢失
+        // 【投票修复】额外匹配 _councilStateDesc，确保投票决策的行动效果一定能触发
         let matchedEffect = null;
-        for (const entry of GST.ACTION_EFFECT_MAP) {
-            for (const keyword of entry.keywords) {
-                if (currentDesc.includes(keyword) || scheduleDesc.includes(keyword)) {
-                    matchedEffect = entry;
-                    break;
+        const explicitEffectKey = this._taskOverride && this._taskOverride.isActive
+            ? this._taskOverride.effectKey || null
+            : null;
+        if (explicitEffectKey) {
+            matchedEffect = GST.ACTION_EFFECT_MAP.find(entry => entry.effectKey === explicitEffectKey) || null;
+        }
+        if (!matchedEffect) {
+            for (const entry of GST.ACTION_EFFECT_MAP) {
+                for (const keyword of entry.keywords) {
+                    if (currentDesc.includes(keyword) || scheduleDesc.includes(keyword) || councilDesc.includes(keyword)) {
+                        matchedEffect = entry;
+                        break;
+                    }
                 }
+                if (matchedEffect) break;
             }
-            if (matchedEffect) break;
         }
 
         if (!matchedEffect) {
@@ -73,7 +86,13 @@
                     const powerBonus = rs.getPowerEfficiencyBonus ? rs.getPowerEfficiencyBonus(this.currentScene) : 1.0;
                     const rate = matchedEffect.ratePerHour / 3600 * staminaEfficiency * specialtyMultiplier * powerBonus;
                     const produced = rate * gameSeconds;
-                    rs[matchedEffect.resourceType] = (rs[matchedEffect.resourceType] || 0) + produced;
+                    // 【修复】改用addResource方法，让产出被正确统计到dailyCollected
+                    // 旧代码直接写rs[type]会绕过统计和电力恢复检测
+                    if (rs.addResource) {
+                        rs.addResource(matchedEffect.resourceType, produced);
+                    } else {
+                        rs[matchedEffect.resourceType] = (rs[matchedEffect.resourceType] || 0) + produced;
+                    }
                     // 【任务10】更新目标追踪计数器
                     if (this._goalTrackers) {
                         if (matchedEffect.resourceType === 'woodFuel') {
@@ -131,6 +150,26 @@
                 }
                 break;
             }
+            case 'build_machine': {
+                // 建造自动化机器（发电机/伐木机）
+                const ms = game.machineSystem;
+                if (ms && matchedEffect.machineType) {
+                    const mType = matchedEffect.machineType;
+                    const machine = ms[mType];
+                    if (machine && !machine.built) {
+                        if (!machine.building) {
+                            // 尚未开始建造，自动启动
+                            ms.startBuild(mType, [this.id]);
+                        } else {
+                            // 已在建造中，作为工人加入
+                            if (!machine.buildWorkers.includes(this.id)) {
+                                machine.buildWorkers.push(this.id);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
             case 'craft_medkit': {
                 // 制作急救包（由任务5实现具体逻辑，这里标记状态）
                 // 【修复】dt 需转为游戏秒
@@ -160,33 +199,7 @@
                 }
                 break;
             }
-            case 'repair_radio': {
-                // 修理无线电（由任务5实现具体逻辑，这里标记状态）
-                if (game._radioRepaired) break; // 已修好
-                if (!game._radioRepairProgress) game._radioRepairProgress = 0;
-                const repairGameSeconds = dt * (game.timeSpeed || 60);
-                const repairRate = staminaEfficiency * specialtyMultiplier;
-                game._radioRepairProgress += (repairGameSeconds / 28800) * repairRate; // 28800游戏秒(8游戏小时)完成
-                // 【任务8】修理进度日志（每25%通知一次）
-                const repairPct = Math.floor(game._radioRepairProgress * 100);
-                if (!this._lastRepairPctLog) this._lastRepairPctLog = 0;
-                if (repairPct >= this._lastRepairPctLog + 25 && repairPct < 100) {
-                    this._lastRepairPctLog = Math.floor(repairPct / 25) * 25;
-                    this._logDebug && this._logDebug('production', `[进度] ${this.name}修理无线电 ${this._lastRepairPctLog}%`);
-                    if (game.addEvent) {
-                        game.addEvent(`🔧 ${this.name}修理无线电进度: ${this._lastRepairPctLog}%`);
-                    }
-                }
-                if (game._radioRepairProgress >= 1) {
-                    game._radioRepairProgress = 1;
-                    game._radioRepaired = true;
-                    if (game.addEvent) {
-                        game.addEvent(`📻 ${this.name}修好了无线电！可以向外界求救了！`);
-                    }
-                    this._logDebug('action', `[效果] 无线电修理完成！`);
-                }
-                break;
-            }
+            // repair_radio 已移除（v4.5）
             case 'reduce_waste': {
                 // 设置食物浪费减少标记（在用餐系统中使用）
                 game._foodWasteReduction = true;
@@ -243,6 +256,22 @@
             }
             case 'explore_ruins': {
                 // 废墟探索——每1游戏小时触发一次随机探索
+                // 【修复】当天已exhausted时不再反复触发fallback，避免废墟↔矿渣堆来回跑
+                const curDay = game.dayCount || 1;
+                if (this._ruinsExhaustedDay === curDay) {
+                    // 当天废墟已搜刮干净，不再执行探索逻辑
+                    // 如果还没fallback过，执行一次fallback
+                    if (!this._ruinsFallbackDone) {
+                        this._ruinsFallbackDone = true;
+                        // 【修复】废墟耗尽后取消taskOverride，否则taskOverride持续把NPC拉回ruins_site
+                        if (this._taskOverride && this._taskOverride.isActive &&
+                            this._taskOverride.targetLocation === 'ruins_site') {
+                            this.deactivateTaskOverride();
+                        }
+                        this._fallbackToRoleDefaultAction(game);
+                    }
+                    break;
+                }
                 if (!this._ruinsExploreTimer) this._ruinsExploreTimer = 0;
                 const exploreGameSeconds = dt * (game.timeSpeed || 60);
                 this._ruinsExploreTimer += exploreGameSeconds;
@@ -251,21 +280,21 @@
                     if (rs && rs.performRuinsExploration) {
                         const result = rs.performRuinsExploration(this);
                         if (result && result.type === 'exhausted') {
-                            // 废墟已搜刮干净，回退到默认行为
+                            // 标记当天已exhausted，防止重复触发
+                            this._ruinsExhaustedDay = curDay;
+                            this._ruinsFallbackDone = true;
+                            // 【修复】废墟耗尽后取消taskOverride，否则taskOverride持续把NPC拉回ruins_site
+                            if (this._taskOverride && this._taskOverride.isActive &&
+                                this._taskOverride.targetLocation === 'ruins_site') {
+                                this.deactivateTaskOverride();
+                            }
                             this._fallbackToRoleDefaultAction(game);
                         }
                     }
                 }
                 break;
             }
-            case 'furnace_maintain': {
-                // 暖炉维护——确保暖炉有木柴就运转
-                // 效果：暖炉附近取暖效率+5%（通过标记）
-                game._furnaceMaintained = true;
-                // 【优化】良好维护减少燃料浪费，暖炉消耗-10%
-                game._furnaceFuelSaving = true;
-                break;
-            }
+            // furnace_maintain 已移除（v4.13: 暖炉是被动系统，自动燃烧消耗木柴，不需要专人维护）
             case 'patrol_bonus': {
                 // 巡逻/警戒——全队San恢复加成+10%
                 game._patrolBonus = true;
@@ -328,7 +357,7 @@
                 } else if (matchedEffect.resourceType === 'food') {
                     dynamicBubble = `🎣 采集食物中（食物+${rateDisplay}/h）`;
                 } else if (matchedEffect.resourceType === 'power') {
-                    // 区分维修发电机和修理工具
+                    // 区分人工发电和修理工具
                     const isRepairTool = (this.stateDesc || '').includes('修理工具');
                     const isOutdoorMining = this.currentScene === 'village';
                     if (isOutdoorMining) {
@@ -336,7 +365,7 @@
                     } else {
                         dynamicBubble = isRepairTool
                             ? `🔧 修理工具（⚡+${rateDisplay}/h）`
-                            : `🔧 维修发电机中（⚡+${rateDisplay}/h）`;
+                            : `⚡ 人工发电中（⚡+${rateDisplay}/h）`;
                     }
                 }
                 break;
@@ -348,14 +377,7 @@
                 dynamicBubble = `💊 制药中（进度${medkitProgress}% 库存×${medkitStock}）`;
                 break;
             }
-            case 'repair_radio': {
-                // 计算修理进度百分比
-                const radioProgress = Math.min(100, Math.floor((game._radioRepairProgress || 0) * 100));
-                dynamicBubble = game._radioRepaired
-                    ? `📻 无线电已修好！`
-                    : `📻 修理无线电（进度${radioProgress}%）`;
-                break;
-            }
+            // repair_radio bubble 已移除（v4.5）
             case 'explore_ruins': {
                 // 废墟探索气泡
                 const rs2 = game.resourceSystem;
@@ -378,6 +400,24 @@
                 }
                 break;
             }
+            case 'build_machine': {
+                // 读取机器建造进度
+                const ms2 = game.machineSystem;
+                if (ms2 && matchedEffect.machineType) {
+                    const mach = ms2[matchedEffect.machineType];
+                    const mConf = GST.MACHINE_CONFIG ? GST.MACHINE_CONFIG[matchedEffect.machineType] : null;
+                    const machName = mConf ? mConf.name : matchedEffect.machineType;
+                    if (mach && mach.building && !mach.built) {
+                        const machPct = Math.min(100, Math.floor((mach.buildProgress || 0) * 100));
+                        dynamicBubble = `🏗️ ${machName}建造中（进度${machPct}%，${mach.buildWorkers.length}人）`;
+                    } else if (mach && mach.built) {
+                        dynamicBubble = `🏗️ ${machName}已建成！`;
+                    } else {
+                        dynamicBubble = `🏗️ 准备建造${machName}…`;
+                    }
+                }
+                break;
+            }
             case 'reduce_waste': {
                 // 动态计算食物产出（3/h × 专长倍率）
                 const wasteFood = (3 * specialtyMultiplier).toFixed(1);
@@ -386,16 +426,41 @@
                 break;
             }
             case 'medical_heal': {
-                // 【v2.1】更新气泡文本：基础0.005/游戏秒
+                // 【v4.4.3】更新气泡文本：显示具体治疗对象
                 const healPerHour = (0.005 * 3600 * specialtyMultiplier).toFixed(0);
                 const medkitInfo = (game._medkitCount || 0) > 0 ? `💊×${game._medkitCount}` : '⚠️无急救包';
-                dynamicBubble = `🏥 医疗救治中（HP+${healPerHour}/h ${medkitInfo}）`;
+                // 找出同场景中HP最低的NPC作为显示对象
+                const healTargets = game.npcs.filter(n =>
+                    !n.isDead && n.id !== this.id && n.currentScene === this.currentScene && n.health < 100
+                ).sort((a, b) => a.health - b.health);
+                if (healTargets.length > 0) {
+                    const mainTarget = healTargets[0];
+                    const othersCount = healTargets.length - 1;
+                    const targetInfo = othersCount > 0
+                        ? `${mainTarget.name}等${healTargets.length}人`
+                        : mainTarget.name;
+                    dynamicBubble = `🏥 医疗救治中（HP+${healPerHour}/h ${medkitInfo}）\n   → 治疗对象: ${targetInfo}`;
+                } else {
+                    dynamicBubble = `🏥 医疗待命中（${medkitInfo}）\n   → 同场景无需治疗的伤员`;
+                }
                 break;
             }
             case 'morale_boost': {
-                // 动态计算San恢复速率（修正后0.003/游戏秒 × 3600 × 专长倍率）
+                // 【v4.4.3】动态计算San恢复速率 + 显示安抚对象
                 const sanPerHour = (0.003 * 3600 * specialtyMultiplier).toFixed(1);
-                dynamicBubble = `💬 安抚鼓舞中（San+${sanPerHour}/h）`;
+                const moraleTargets = game.npcs.filter(n =>
+                    !n.isDead && n.id !== this.id && n.currentScene === this.currentScene && n.sanity < 100
+                ).sort((a, b) => a.sanity - b.sanity);
+                if (moraleTargets.length > 0) {
+                    const mainMTarget = moraleTargets[0];
+                    const mOthersCount = moraleTargets.length - 1;
+                    const mTargetInfo = mOthersCount > 0
+                        ? `${mainMTarget.name}等${moraleTargets.length}人`
+                        : mainMTarget.name;
+                    dynamicBubble = `💬 安抚鼓舞中（San+${sanPerHour}/h）\n   → 安抚对象: ${mTargetInfo}`;
+                } else {
+                    dynamicBubble = `💬 安抚鼓舞待命中\n   → 同场景无需安抚的人`;
+                }
                 break;
             }
             case 'patrol_bonus': {
@@ -410,21 +475,15 @@
                     : `🛡️ 巡逻警戒中（全队San恢复+10%）`;
                 break;
             }
-            case 'furnace_maintain': {
-                // 动态计算燃料节省（基础10% × 专长倍率）
-                const fuelSavePct = Math.round(10 * specialtyMultiplier);
-                dynamicBubble = `🔥 维护暖炉中（柴耗-${fuelSavePct}%）`;
-                break;
-            }
-        }
-        // 仅在NPC当前没有更重要的表情时设置气泡
+            // furnace_maintain 已移除（v4.13）
+        }        // 仅在NPC当前没有更重要的表情时设置气泡
         if (!this.expression || this.expressionTimer <= 0) {
             this.expression = dynamicBubble;
             this.expressionTimer = 3;
         }
 
         // 【优化】NPC离开辅助效果对应场景时，清除全局标记
-        if (matchedEffect.effectType === 'reduce_waste' || matchedEffect.effectType === 'patrol_bonus' || matchedEffect.effectType === 'furnace_maintain') {
+        if (matchedEffect.effectType === 'reduce_waste' || matchedEffect.effectType === 'patrol_bonus') {
             // 上面的 requiredScene 检查已确保NPC在正确场景时才执行效果
             // 这里额外处理：检查是否有NPC仍在执行该辅助效果，如果没有则清除标记
             // （由于每帧都会执行，标记会被在场NPC重新设置，所以无需额外检查）

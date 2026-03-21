@@ -51,6 +51,10 @@ const DIFFICULTY_LEVELS = {
         // 户外时间限制缩减（秒）
         outdoorTimePenalty: 0,
 
+        // 机器故障率（每游戏小时概率）& 维修时间（游戏秒）
+        machineBreakdownChance: 0.10,
+        machineRepairSeconds: 900,   // 15分钟（坏得少修得快）
+
         // 轮回Buff强度
         reincarnationBuffMult: 1.0,   // San加成倍率
         gatherExpBonus: 0,             // 每世采集经验加成（0表示无）
@@ -86,6 +90,9 @@ const DIFFICULTY_LEVELS = {
         tempOffset: 5,
         outdoorTimePenalty: 0,
 
+        machineBreakdownChance: 0.15,
+        machineRepairSeconds: 1200,  // 20分钟
+
         reincarnationBuffMult: 1.2,
         gatherExpBonus: 0.02,
         aiIntervalReduction: 0.10
@@ -119,6 +126,9 @@ const DIFFICULTY_LEVELS = {
 
         tempOffset: 10,
         outdoorTimePenalty: 15 * 60,  // -15分钟（秒）
+
+        machineBreakdownChance: 0.20,
+        machineRepairSeconds: 1500,  // 25分钟
 
         reincarnationBuffMult: 1.4,
         gatherExpBonus: 0.03,
@@ -154,6 +164,9 @@ const DIFFICULTY_LEVELS = {
         tempOffset: 15,
         outdoorTimePenalty: 30 * 60,  // -30分钟（秒）
 
+        machineBreakdownChance: 0.25,
+        machineRepairSeconds: 1800,  // 30分钟（半小时）
+
         reincarnationBuffMult: 1.6,
         gatherExpBonus: 0.04,
         aiIntervalReduction: 0.14
@@ -188,6 +201,9 @@ const DIFFICULTY_LEVELS = {
         tempOffset: 20,
         outdoorTimePenalty: 45 * 60,  // -45分钟（秒）
 
+        machineBreakdownChance: 0.30,
+        machineRepairSeconds: 1800,  // 30分钟
+
         reincarnationBuffMult: 2.0,
         gatherExpBonus: 0.05,
         aiIntervalReduction: 0.16
@@ -221,6 +237,9 @@ const DIFFICULTY_LEVELS = {
 
         tempOffset: 25,             // Day2: -55°C, Day4: -85~-90°C
         outdoorTimePenalty: 60 * 60, // -60分钟（秒），Day4基本禁入
+
+        machineBreakdownChance: 0.35,
+        machineRepairSeconds: 1800,  // 30分钟
 
         reincarnationBuffMult: 2.5,
         gatherExpBonus: 0.06,

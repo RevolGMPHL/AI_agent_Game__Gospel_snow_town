@@ -50,7 +50,7 @@
 | 角色 | 角色定位(role) | 主要贡献 | 核心行动效果 |
 |------|--------------|---------|-------------|
 | **李婶** | support（后勤） | 物资管理 + 烹饪 | `reduce_waste`（浪费-20%）|
-| **赵铁柱** | worker（工人） | 砍柴 + 暖炉维护 | `produce_resource(woodFuel, 10/h×1.5)` + `furnace_maintain` |
+| **赵铁柱** | worker（工人） | 砍柴 + 暖炉维护（节柴/暖区增益） | `produce_resource(woodFuel, 10/h×1.5)` + `furnace_maintain` |
 | **王策** | engineer（工程师） | 发电机维修 + 暖炉扩建 | `produce_resource(power, 8/h×2.0)` + `build_progress` |
 | **老钱** | support（后勤） | 安抚民心 + 调解冲突 | `morale_boost(×2.0)` |
 | **苏岩** | engineer（工程师） | 医疗坐诊 + 采集食物 + 巡查安抚 | `medical_heal(×2.0)` + `produce_resource(food, 8/h)` + `morale_boost` |
@@ -313,6 +313,46 @@
 
 ---
 
+## 5倍速时间语义（v4.15 新增）
+
+为了适配常用的 **5 倍速游戏节奏**，NPC 系统内部不再把所有计时器都统一理解成“跟随倍速一起走”。现在明确分成两类：
+
+### 1. 游戏时间：负责世界推进
+
+以下逻辑应该跟随倍速一起变快：
+- 资源产出与消耗
+- 属性演化（如饥饿、体温、San、健康等世界推进型变化）
+- 位移推进、昼夜流逝、行动进度
+- `ACTION_EFFECT_MAP` 触发的工作收益和场景贡献
+
+这意味着 5 倍速下，NPC **应该更快移动、更快完成工作、更快推进一天流程**。
+
+### 2. 真实时间：负责安全控制
+
+以下逻辑必须按真实秒数计算，不能因为倍速提高而同步缩短：
+- `aiCooldown`
+- 行为锁 `startTime` / 超时判断
+- `_restCooldownTimer`
+- `_yieldTimer`
+- `stuckTimer`
+- `collisionStallTimer`
+- 聊天冷却、紧急检查、恢复缓冲等保护性计时器
+
+这些计时器的职责不是“推进世界”，而是**防止系统失控**。如果它们也跟着 5 倍速一起压缩，NPC 会出现：
+- 刚出门就被判定卡住
+- 刚让路又立刻重新抢路
+- 刚恢复行动就又被重规划
+- 高频抖动、频繁换目标、行为撕裂
+
+### 3. 一句话判断标准
+
+- **让世界更快** → 用游戏时间
+- **防止系统失控** → 用真实时间
+
+后续如果继续给 NPC 增加计时器，必须先判断它属于哪一类，而不是默认直接用 `dt * speedMultiplier`。
+
+---
+
 ## 行动效果映射表（ACTION_EFFECT_MAP）
 
 系统通过关键词匹配 NPC 当前行为描述（desc），自动触发对应效果：
@@ -330,7 +370,7 @@
 | reduce_waste | 做早餐、准备早餐/午餐/晚餐、分配食物、准备明日食材 | kitchen | -20%浪费 | 🍳 |
 | medical_heal | 坐诊、治疗冻伤、心理疏导、巡查伤员、医疗救治、处理伤员 | medical | — | 🏥 |
 | medical_heal | 巡查 | 不限 | — | 🏥 |
-| furnace_maintain | 维护暖炉、添加柴火 | 不限 | — | 🔥 |
+| furnace_maintain | 维护暖炉、添加柴火 | 不限 | 柴耗-30% + 暖区增强 | 🔥 |
 | patrol_bonus | 巡逻、警戒、安全巡查、巡视、陷阱、警报 | village | San恢复 | 🛡️ |
 | morale_boost | 安抚、调解冲突、统筹、鼓舞、讲故事、安慰、谈心 | 不限 | San恢复 | 💬 |
 | produce_resource(power) | 修理工具 | workshop | 4/h | 🔧 |

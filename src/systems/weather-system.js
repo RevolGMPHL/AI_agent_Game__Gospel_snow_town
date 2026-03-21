@@ -192,11 +192,9 @@ class WeatherSystem {
     getEffectiveTemp() {
         const hour = this.game.getHour();
         const isNight = hour < this.dawnHour || hour >= this.duskHour;
+        // 【修复】currentTemp 在 onDayChange 中已经应用了 tempOffset，这里不再重复扣减
+        // 旧代码会导致 tempOffset 被双重扣减，高难度下温度异常低，资源消耗严重偏高
         let temp = this.currentTemp + (isNight ? this.dayConfig.nightTempDrop : 0);
-        // 【难度系统】温度偏移：高难度下温度额外降低
-        if (this.game && this.game.difficulty && this.game.difficulty.tempOffset) {
-            temp -= this.game.difficulty.tempOffset;
-        }
         return temp;
     }
 
