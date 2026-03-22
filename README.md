@@ -176,7 +176,7 @@ graph TD
 | 🧓 **Old Qian** | Spiritual Leader | Conflict mediation ×2, experience-based judgment | Qing Xuan's grandfather |
 | 🏥 **Su Yan** (Dr. Su) | Medical Expert | Frostbite treatment ×2, psychological counseling | — |
 | 💪 **Lu Chen** | Gatherer / Builder | Construction ×1.5, cold resistance (temp drop ×0.7) | Aunt Li's son |
-| 🔍 **Ling Yue** | Scout / First Aid / Morale | Ruin scouting (rare loot ×2), morale boost | — |
+| 🔍 **Xin Yue** | Scout / First Aid / Morale | Ruin scouting (rare loot ×2), morale boost | — |
 | 🧪 **Qing Xuan** | Pharmacist / Traps / Radio | Herbal medicine ×1.5, radio repair | Old Qian's granddaughter |
 
 ---
