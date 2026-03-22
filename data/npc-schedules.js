@@ -13,8 +13,8 @@
     medical_door:    { scene: 'village', x: 33, y: 16 },  // 医疗站门口
     dorm_a_door:     { scene: 'village', x: 16, y: 24 },  // 宿舍A门口
     dorm_b_door:     { scene: 'village', x: 33, y: 24 },  // 宿舍B门口
-    kitchen_door:    { scene: 'village', x: 15, y: 31 },  // 炊事房门口
-    workshop_door:   { scene: 'village', x: 24, y: 31 },  // 工坊门口
+    kitchen_door:    { scene: 'village', x: 15, y: 30 },  // 炊事房门口（doorY=30，y=31是南围墙会卡住）
+    workshop_door:   { scene: 'village', x: 24, y: 30 },  // 工坊门口（doorY=30，y=31是南围墙/南门位置）
 
     // ---- 室内默认位置 ----
     warehouse_inside:{ scene: 'warehouse', x: 5,  y: 6 },

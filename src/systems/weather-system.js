@@ -44,11 +44,11 @@ const DAY_CONFIG = [
         baseTemp: 0,
         weather: '多云',
         weatherEmoji: '⛅',
-        desc: '喘息日 — 补充物资、修建第二座暖炉',
+        desc: '喘息日 — 补充物资、加固集中供暖保障',
         outdoorTimeLimit: Infinity,
         canGoOutside: true,
         nightTempDrop: -5,
-        announcement: '🌤️ 气温回升至0°C！抓紧补充物资，修建第二座暖炉！',
+        announcement: '🌤️ 气温回升至0°C！抓紧补充物资，确保木材和电力储备充足！',
     },
     // Day 4: 大极寒
     {
@@ -169,7 +169,7 @@ class WeatherSystem {
                 npc.sanity = Math.min(100, npc.sanity + 15);
             }
             if (this.game.addEvent) {
-                this.game.addEvent(`🌤️ 第3天喘息日开始！天气转好，全员士气回升（San+15），暖炉旁恢复速率×1.5`);
+                this.game.addEvent(`🌤️ 第3天喘息日开始！天气转好，全员士气回升（San+15），室内恢复速率提升`);
             }
             // 健康<30的NPC自动安排休息任务
             if (this.game.taskSystem) {
@@ -322,26 +322,15 @@ class WeatherSystem {
                     this.outdoorTime[npc.id] = Math.max(0, (this.outdoorTime[npc.id] || 0) - dt * 2);
                 }
 
-                // 【v2.1】暖炉熄灭时室内低强度寒冷惩罚
+                // 室内寒冷惩罚：集中供暖越弱，室内越接近失温
                 if (temp < -20) {
-                    const fs = this.game.furnaceSystem;
-                    if (fs) {
-                        const nearFurnace = fs.isNearActiveFurnace(npc);
-                        if (!nearFurnace) {
-                            // 暖炉未运行，检查冷却进度
-                            // 找到NPC所在场景的暖炉（可能正在冷却）
-                            const coolingFurnace = fs.furnaces.find(f => !f.active && f._coolingTimer > 0);
-                            let coolingProgress = 1.0; // 默认完全冷却，施加满额惩罚
-                            if (coolingFurnace) {
-                                // 刚熄灭时惩罚=0%，完全冷却后惩罚=100%
-                                const cooldownTotal = 30 * 60; // cooldownMinutes=30，转为秒
-                                coolingProgress = 1 - Math.max(0, coolingFurnace._coolingTimer) / cooldownTotal;
-                            }
-                            // 低强度惩罚（约户外的1/10）
-                            npc.stamina = Math.max(0, npc.stamina - 0.03 * coolingProgress * dt);
-                            npc.health = Math.max(0, npc.health - 0.02 * coolingProgress * dt);
-                            npc.sanity = Math.max(0, npc.sanity - 0.01 * coolingProgress * dt);
-                        }
+                    const hs = this.game.furnaceSystem;
+                    const heatingStrength = hs && hs.getHeatingStrength ? hs.getHeatingStrength() : 0;
+                    const indoorExposure = Math.max(0, 1 - heatingStrength);
+                    if (indoorExposure > 0) {
+                        npc.stamina = Math.max(0, npc.stamina - 0.03 * indoorExposure * dt);
+                        npc.health = Math.max(0, npc.health - 0.02 * indoorExposure * dt);
+                        npc.sanity = Math.max(0, npc.sanity - 0.01 * indoorExposure * dt);
                     }
                 }
             }
@@ -492,11 +481,11 @@ class WeatherSystem {
         const temp = this.getEffectiveTemp();
         const alive = this.game.npcs.filter(n => !n.isDead).length;
         const rs = this.game.resourceSystem;
-        const fs = this.game.furnaceSystem;
+        const hs = this.game.furnaceSystem;
         return `【生存状态】第${this.currentDay}天 | 温度${temp}°C | ${this.currentWeather} | ` +
             `存活${alive}/8人 | ` +
             (rs ? `木柴${Math.round(rs.woodFuel)} 食物${Math.round(rs.food)} 电力${Math.round(rs.power)} | ` : '') +
-            (fs ? `暖炉${fs.furnaces.length}座(${fs.getActiveFurnaceCount()}运转中)` : '');
+            (hs ? `${hs.getHeatingSummary()}` : '');
     }
 
     /** 获取暴风雪紧迫感描述（给对话prompt注入，让NPC知道暴风雪即将到来） */
@@ -522,11 +511,11 @@ class WeatherSystem {
         } else if (day === 3) {
             // 第3天：喘息日，最后准备机会
             const hoursUntilStorm = Math.max(0, 24 - hour);
-            urgency = `🚨🚨🚨 【最后准备！今晚24点暴风雪来袭！】今天是第3天喘息日，气温短暂回升到0°C。这是暴风雪前最后的准备时间！今晚24点（也就是大约${Math.round(hoursUntilStorm)}小时后）进入第4天，届时将是-60°C极寒暴风雪，严禁外出，所有人只能待在室内靠暖炉和储备物资活命！如果准备不够充分，大家都会冻死在明天！必须在今天内：修好第二座暖炉、囤够木柴和食物、修好无线电！`;
+            urgency = `🚨🚨🚨 【最后准备！今晚24点暴风雪来袭！】今天是第3天喘息日，气温短暂回升到0°C。这是暴风雪前最后的准备时间！今晚24点（也就是大约${Math.round(hoursUntilStorm)}小时后）进入第4天，届时将是-60°C极寒暴风雪，严禁外出，所有人只能待在室内靠木材、电力和储备物资活命！如果准备不够充分，大家都会冻死在明天！必须在今天内：囤够木柴和食物，并确保电力储备足以维持集中供暖！`;
             survivalChecklist = this._buildSurvivalChecklist(rs, fs);
         } else if (day === 4) {
             // 第4天：大极寒
-            urgency = `🚨🚨🚨 【大极寒已降临！-60°C！】现在是第4天，极寒暴风雪正在肆虐！严禁外出！出去就是死！所有人必须待在暖炉旁，靠之前储备的木柴和食物撑过今天。如果暖炉熄灭或食物耗尽，就全完了。坚持到今天日落（18:00），就能迎来救援！`;
+            urgency = `🚨🚨🚨 【大极寒已降临！-60°C！】现在是第4天，极寒暴风雪正在肆虐！严禁外出！出去就是死！所有人必须待在室内，靠木材、电力和食物撑过今天。如果供暖崩溃或食物耗尽，就全完了。坚持到今天日落（18:00），就能迎来救援！`;
             survivalChecklist = this._buildSurvivalChecklist(rs, fs);
         }
 
@@ -536,20 +525,19 @@ class WeatherSystem {
     /** 构建生存物资清单检查（给AI看当前准备够不够） */
     _buildSurvivalChecklist(rs, fs) {
         if (!rs) return '';
-        const furnaceCount = fs ? fs.furnaces.length : 1;
-        const secondFurnaceBuilt = fs ? fs.secondFurnaceBuilt : false;
-        const activeFurnaces = fs ? fs.getActiveFurnaceCount() : 0;
+        const heatingStrength = fs && fs.getHeatingStrength ? fs.getHeatingStrength() : 0;
+        const heatingSummary = fs && fs.getHeatingSummary ? fs.getHeatingSummary() : `供暖${Math.round(heatingStrength * 100)}%`;
 
         // 计算第4天需要的最低物资
-        const woodNeededDay4 = 3 * furnaceCount * 24; // 每暖炉每小时3单位 × 24小时
-        const foodNeededDay4 = 8 * 2 * 2; // 8人 × 2餐 × 2单位/餐
-        const powerNeededDay4 = 5 * 24; // 每小时5单位 × 24小时
+        const woodNeededDay4 = 72;
+        const foodNeededDay4 = 8 * 2 * 2;
+        const powerNeededDay4 = 5 * 24;
 
         let checklist = `📋 【物资检查】\n`;
         checklist += `  🪵 木柴: ${Math.round(rs.woodFuel)}单位（第4天至少需要${woodNeededDay4}单位）${rs.woodFuel >= woodNeededDay4 ? '✅够了' : `❌还差${Math.round(woodNeededDay4 - rs.woodFuel)}单位！`}\n`;
         checklist += `  🍞 食物: ${Math.round(rs.food)}单位（第4天至少需要${foodNeededDay4}单位）${rs.food >= foodNeededDay4 ? '✅够了' : `❌还差${Math.round(foodNeededDay4 - rs.food)}单位！`}\n`;
         checklist += `  ⚡ 电力: ${Math.round(rs.power)}单位（第4天至少需要${powerNeededDay4}单位）${rs.power >= powerNeededDay4 ? '✅够了' : `❌还差${Math.round(powerNeededDay4 - rs.power)}单位！`}\n`;
-        checklist += `  🔥 暖炉: ${furnaceCount}座（${activeFurnaces}运转中）${secondFurnaceBuilt ? '✅第二暖炉已修复' : '❌第二暖炉未修复！8人挤1座暖炉很危险！'}`;
+        checklist += `  🌡️ ${heatingSummary}${heatingStrength >= 0.75 ? '✅稳定' : '❌偏弱，需继续补木材和电力'}`;
         return checklist;
     }
 }

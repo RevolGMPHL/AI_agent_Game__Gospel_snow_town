@@ -178,8 +178,8 @@ class ReincarnationSystem {
             totalCollected: { ...rs.totalCollected },
         } : null;
 
-        // 第二暖炉状态
-        const secondFurnaceBuilt = fs ? fs.secondFurnaceBuilt : false;
+        // 供暖准备状态（兼容旧字段名，语义已改为集中供暖是否准备充分）
+        const secondFurnaceBuilt = fs ? (fs.getHeatingStrength ? fs.getHeatingStrength() >= 0.75 : true) : true;
 
         // 未完成任务
         const unfinishedTasks = ts ? ts.unfinishedTaskLog.map(log => ({
@@ -265,7 +265,7 @@ class ReincarnationSystem {
                 lessons.push(`${outdoorDeaths.map(r => r.name).join('、')}在户外冻死，应严格控制外出时间，尤其第2天`);
             }
             if (frozenDeaths.some(r => r.day >= 4)) {
-                lessons.push('第4天有人冻死，暖炉供暖和木柴储备不够，需提前准备更多木柴');
+                lessons.push('第4天有人冻死，集中供暖强度和木材/电力储备不够，需提前准备更多木柴并维持电力');
             }
         }
 
@@ -281,9 +281,9 @@ class ReincarnationSystem {
             lessons.push('有人精神崩溃致死，需更重视San值维护，多安排鼓舞和心理疏导');
         }
 
-        // 6. 第二暖炉未建好
+        // 6. 供暖准备不足
         if (!secondFurnaceBuilt) {
-            lessons.push('第二暖炉未能建好，Day3解锁后应立即派2人去工坊修复');
+            lessons.push('供暖准备不足，Day3应优先补齐木材和电力，确保第4天集中供暖稳定');
         }
 
         // 7. 全员存活
@@ -418,9 +418,9 @@ class ReincarnationSystem {
                 hint += `上世最终资源:木柴${rs.woodFuel}食物${rs.food}电力${rs.power}。`;
             }
 
-            // 暖炉状态
+            // 供暖准备状态
             if (!lastLife.secondFurnaceBuilt) {
-                hint += '❗上世第二暖炉未建成！';
+                hint += '❗上世集中供暖准备不足！';
             }
 
             // 【修复D】多世综合失败模式
@@ -459,7 +459,7 @@ class ReincarnationSystem {
             }
 
             if (!lastLife.secondFurnaceBuilt) {
-                hint += '第二暖炉未建好！';
+                hint += '供暖准备不足！';
             }
 
             if (lastLife.lessons && lastLife.lessons.length > 0) {
@@ -496,9 +496,9 @@ class ReincarnationSystem {
             }
         }
 
-        // 暖炉建议
+        // 供暖建议
         if (!lastLife.secondFurnaceBuilt) {
-            advice += 'Day3解锁第二暖炉后立即派2人去工坊修复;';
+            advice += 'Day3优先补足木材和电力，确保集中供暖稳定;';
         }
 
         // 户外安全
@@ -671,7 +671,7 @@ class ReincarnationSystem {
                     { npcId: 'lu_chen', task: 'COLLECT_WOOD', targetLocation: 'lumber_camp', reason: '默认：砍柴' },
                     { npcId: 'li_shen', task: 'COLLECT_FOOD', targetLocation: 'frozen_lake', reason: '默认：采食物' },
                     { npcId: 'wang_teacher', task: 'MAINTAIN_POWER', targetLocation: 'workshop_door', reason: '默认：维护电力' },
-                    { npcId: 'old_qian', task: 'COORDINATE', targetLocation: 'furnace_plaza', reason: '默认：统筹协调' },
+                    { npcId: 'old_qian', task: 'COORDINATE', targetLocation: 'dorm_a_door', reason: '默认：统筹协调' },
                     { npcId: 'su_doctor', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '默认：医疗准备' },
                     { npcId: 'ling_yue', task: 'SCOUT_RUINS', targetLocation: 'ruins_site', reason: '默认：废墟侦察' },
 { npcId: 'qing_xuan', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '默认：医疗救治' },
@@ -681,17 +681,17 @@ class ReincarnationSystem {
                     { npcId: 'lu_chen', task: 'COLLECT_FOOD', targetLocation: 'frozen_lake', reason: '冒险采食(限2h)' },
                     { npcId: 'li_shen', task: 'DISTRIBUTE_FOOD', targetLocation: 'kitchen_door', reason: '分配食物' },
                     { npcId: 'wang_teacher', task: 'MAINTAIN_POWER', targetLocation: 'workshop_door', reason: '维护电力' },
-                    { npcId: 'old_qian', task: 'MAINTAIN_ORDER', targetLocation: 'furnace_plaza', reason: '安抚情绪' },
+                    { npcId: 'old_qian', task: 'MAINTAIN_ORDER', targetLocation: 'dorm_a_door', reason: '安抚情绪' },
                     { npcId: 'su_doctor', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗待命' },
-                    { npcId: 'ling_yue', task: 'BOOST_MORALE', targetLocation: 'furnace_plaza', reason: '鼓舞士气' },
+                    { npcId: 'ling_yue', task: 'BOOST_MORALE', targetLocation: 'dorm_a_door', reason: '鼓舞士气' },
 { npcId: 'qing_xuan', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗救治' },
                 ],
                 3: [
                     { npcId: 'zhao_chef', task: 'COLLECT_WOOD', targetLocation: 'lumber_camp', reason: '补充木柴为第4天' },
-                    { npcId: 'lu_chen', task: 'BUILD_FURNACE', targetLocation: 'dorm_b_door', reason: '建第二暖炉' },
+                    { npcId: 'lu_chen', task: 'MAINTAIN_POWER', targetLocation: 'workshop_door', reason: '补充供暖电力储备' },
                     { npcId: 'li_shen', task: 'COLLECT_FOOD', targetLocation: 'frozen_lake', reason: '补充食物' },
-                    { npcId: 'wang_teacher', task: 'BUILD_FURNACE', targetLocation: 'dorm_b_door', reason: '建第二暖炉' },
-                    { npcId: 'old_qian', task: 'COORDINATE', targetLocation: 'furnace_plaza', reason: '统筹第4天准备' },
+                    { npcId: 'wang_teacher', task: 'MAINTAIN_POWER', targetLocation: 'workshop_door', reason: '加固供暖系统' },
+                    { npcId: 'old_qian', task: 'COORDINATE', targetLocation: 'dorm_a_door', reason: '统筹第4天准备' },
                     { npcId: 'su_doctor', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗准备' },
                     { npcId: 'ling_yue', task: 'SCOUT_RUINS', targetLocation: 'ruins_site', reason: '最后侦察' },
                     { npcId: 'qing_xuan', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗准备' },
@@ -701,9 +701,9 @@ class ReincarnationSystem {
                     { npcId: 'lu_chen', task: 'PREPARE_WARMTH', targetLocation: 'warehouse_door', reason: '准备御寒物资(室内)' },
                     { npcId: 'li_shen', task: 'DISTRIBUTE_FOOD', targetLocation: 'kitchen_door', reason: '分配食物(室内)' },
                     { npcId: 'wang_teacher', task: 'MAINTAIN_POWER', targetLocation: 'workshop_door', reason: '维护电力(室内)' },
-                    { npcId: 'old_qian', task: 'MAINTAIN_ORDER', targetLocation: 'furnace_plaza', reason: '维持秩序(室内)' },
+                    { npcId: 'old_qian', task: 'MAINTAIN_ORDER', targetLocation: 'dorm_a_door', reason: '维持秩序(室内)' },
                     { npcId: 'su_doctor', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗待命(室内)' },
-                    { npcId: 'ling_yue', task: 'BOOST_MORALE', targetLocation: 'furnace_plaza', reason: '鼓舞士气(室内)' },
+                    { npcId: 'ling_yue', task: 'BOOST_MORALE', targetLocation: 'dorm_a_door', reason: '鼓舞士气(室内)' },
 { npcId: 'qing_xuan', task: 'PREPARE_MEDICAL', targetLocation: 'medical_door', reason: '医疗救治(室内)' },
                 ],
             },
@@ -854,7 +854,7 @@ class ReincarnationSystem {
     /** 生成工作安排摘要（≤200字符） */
     _generateWorkPlanSummary(plan) {
         const nameMap = { zhao_chef: '赵', lu_chen: '陆', li_shen: '李', wang_teacher: '王', old_qian: '钱', su_doctor: '苏', ling_yue: '玥', qing_xuan: '璇' };
-        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食', COLLECT_MATERIAL: '探索', MAINTAIN_POWER: '电力', COORDINATE: '统筹', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞', BUILD_FURNACE: '建炉', PREPARE_WARMTH: '御寒', MAINTAIN_ORDER: '秩序', DISTRIBUTE_FOOD: '分食', REST_RECOVER: '休息' };
+        const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食', COLLECT_MATERIAL: '探索', MAINTAIN_POWER: '电力', COORDINATE: '统筹', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞', PREPARE_WARMTH: '御寒', MAINTAIN_ORDER: '秩序', DISTRIBUTE_FOOD: '分食', REST_RECOVER: '休息' };
         // 只输出Day1的安排
         const day1 = (plan.dayPlans[1] || []).map(a => `${nameMap[a.npcId] || '?'}${taskShort[a.task] || a.task}`).join(',');
         let summary = `D1:${day1}`;
@@ -932,13 +932,13 @@ class ReincarnationSystem {
             execution.push(`因果链：食物不足(剩${rs ? rs.food : '?'}) → ${starvedDeaths.map(d => d.name).join('、')}饿死 → 李婶+陆辰应多采集食物`);
         }
 
-        // 暖炉未建因果链
+        // 供暖准备不足因果链
         if (!lastLife.secondFurnaceBuilt) {
             const day4Deaths = deaths.filter(d => d.day >= 4);
             if (day4Deaths.length > 0) {
-                execution.push(`因果链：第二暖炉未建 → 第4天供暖不足 → ${day4Deaths.map(d => d.name).join('、')}死亡 → 第3天必须全力建暖炉`);
+                execution.push(`因果链：木材/电力准备不足 → 第4天供暖强度不够 → ${day4Deaths.map(d => d.name).join('、')}死亡 → 第3天必须优先补木材并维持电力`);
             } else {
-                execution.push(`第二暖炉未建成，第3天必须优先安排赵铁柱+陆辰+王策建造`);
+                execution.push(`上世供暖准备不足，第3天必须优先安排补木材和维护电力`);
             }
         }
 
@@ -966,7 +966,7 @@ class ReincarnationSystem {
                     foodShortCount++;
                     if (i === this.pastLives.length - 1 - (this.pastLives.length - 1 - i)) consecutiveFoodShort++;
                 }
-                // 暖炉未建
+                // 供暖准备不足
                 if (!life.secondFurnaceBuilt) {
                     furnaceFailCount++;
                     if (i === this.pastLives.length - 1 - (this.pastLives.length - 1 - i)) consecutiveFurnaceFail++;
@@ -1010,9 +1010,9 @@ class ReincarnationSystem {
             }
 
             if (consecutiveFurnaceFail >= 3) {
-                strategic.unshift(`🔴🔴 连续${consecutiveFurnaceFail}世暖炉未建成！历史共${furnaceFailCount}/${this.pastLives.length}世失败，Day3必须立即派2人去工坊修复！`);
+                strategic.unshift(`🔴🔴 连续${consecutiveFurnaceFail}世供暖准备不足！历史共${furnaceFailCount}/${this.pastLives.length}世失败，Day3必须优先补木材并稳住电力！`);
             } else if (consecutiveFurnaceFail >= 2) {
-                strategic.unshift(`🔴 连续${consecutiveFurnaceFail}世暖炉未建！Day3必须立即修复`);
+                strategic.unshift(`🔴 连续${consecutiveFurnaceFail}世供暖准备不足！Day3必须优先补木材和电力`);
             }
 
             for (let day = 1; day <= 4; day++) {
@@ -1101,7 +1101,7 @@ class ReincarnationSystem {
             if (life.aliveCount >= 7 && life.resourceSnapshot) {
                 const rs = life.resourceSnapshot;
                 if (rs.woodFuel > 50) successPatterns.push(`第${life.lifeNumber}世木柴充足(${Math.round(rs.woodFuel)})，砍柴策略可复用`);
-                if (life.secondFurnaceBuilt) successPatterns.push(`第${life.lifeNumber}世暖炉建成，建造时机可复用`);
+                if (life.secondFurnaceBuilt) successPatterns.push(`第${life.lifeNumber}世供暖准备充分，资源分配时机可复用`);
             }
         }
 

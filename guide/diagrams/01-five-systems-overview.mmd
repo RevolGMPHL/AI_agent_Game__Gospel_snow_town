@@ -1,0 +1,43 @@
+graph TB
+    subgraph 系统1["🧠 1. AI 决策系统"]
+        AI1["LLM Client<br/>llm-client.js 13KB"]
+        AI2["NPC AI 决策<br/>npc-ai.js 79KB"]
+        AI3["NPC 日程调度<br/>npc-schedule.js 76KB"]
+        AI4["对话管理<br/>dialogue-manager.js"]
+        AI5["议事系统<br/>council-system.js 35KB"]
+    end
+
+    subgraph 系统2["❤️ 2. 生存属性系统"]
+        AT1["NPC 属性<br/>npc-attributes.js 103KB"]
+        AT2["行动效果<br/>action-effects.js 27KB"]
+        AT3["专长计算<br/>specialty.js 5KB"]
+        AT4["死亡系统<br/>death-system.js 58KB"]
+    end
+
+    subgraph 系统3["🌍 3. 世界环境系统"]
+        W1["天气系统<br/>weather-system.js 24KB"]
+        W2["暖炉系统<br/>furnace-system.js 20KB"]
+        W3["资源系统<br/>resource-system.js 55KB"]
+        W4["机器系统<br/>machine-system.js 20KB"]
+    end
+
+    subgraph 系统4["🗺️ 4. 地图场景系统"]
+        M1["BaseMap 基类<br/>base-map.js 16KB"]
+        M2["VillageMap 村庄<br/>village-map.js 58KB"]
+        M3["IndoorMap × 7<br/>室内场景 30KB"]
+        M4["MapRegistry<br/>map-registry.js"]
+    end
+
+    subgraph 系统5["🔄 5. 元系统 Meta"]
+        META1["轮回系统<br/>reincarnation-system.js 57KB"]
+        META2["任务系统<br/>task-system.js 80KB"]
+        META3["事件系统<br/>event-system.js 19KB"]
+        META4["难度配置<br/>difficulty-config.js 7KB"]
+    end
+
+    系统1 -->|"AI决定NPC行为"| 系统2
+    系统2 -->|"属性影响AI决策"| 系统1
+    系统3 -->|"环境压力"| 系统2
+    系统4 -->|"场景约束"| 系统1
+    系统5 -->|"宏观调控"| 系统3
+    系统5 -->|"跨世代记忆"| 系统1

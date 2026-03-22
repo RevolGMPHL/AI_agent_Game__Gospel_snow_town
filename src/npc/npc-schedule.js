@@ -469,7 +469,9 @@
         const p0t = this._getP0Thresholds();
         // 【v4.5修复】stateOverride=sick时跳过P0-3：NPC已在前往医疗站途中，
         // P0-3会把目标改成宿舍，与stateOverride冲突导致进门出门死循环
-        if (this.health < p0t.healthThreshold && this.currentScene !== 'medical' && this._stateOverride !== 'sick') {
+        // 【v4.17修复】NPC已在自己宿舍时跳过（已经在家了，正在恢复中）
+        const isInHomeDorm = this.currentScene === this.homeName;
+        if (this.health < p0t.healthThreshold && this.currentScene !== 'medical' && !isInHomeDorm && this._stateOverride !== 'sick') {
             // 【行为锁】如果当前行为即将完成(5秒内)，等待完成后再触发P0
             if (this.isEating && this.eatingTimer > 0 && this.eatingTimer < 5) {
                 this._logDebug('schedule', `[P0] 健康${Math.round(this.health)}但吃饭即将完成(${this.eatingTimer.toFixed(1)}s)，等待完成`);
@@ -480,6 +482,27 @@
                     return; // 睡觉中health>=10，不打断睡眠
                 }
                 console.warn(`[NPC-${this.name}] [异常] NPC在睡觉时段被P0驱动出门 health:${Math.round(this.health)}`);
+            }
+            // 【v4.17修复】NPC在非village的其他室内场景（如workshop/kitchen）时，原地休息不踢出
+            const isInOtherIndoor = this.currentScene && this.currentScene !== 'village';
+            if (isInOtherIndoor) {
+                this._behaviorPriority = 'P0';
+                if (this._taskOverride.isActive) {
+                    this._pauseTaskOverride('health_critical', 'priority');
+                }
+                if (this._priorityOverride !== 'health_critical') {
+                    this._priorityOverride = 'health_critical';
+                    this.stateDesc = '健康危急，原地休息恢复中';
+                    this._logDebug('schedule', `[P0] 健康${Math.round(this.health)}，在${this.currentScene}室内原地休息（不踢出）`);
+                    if (this.game && this.game.aiModeLogger) {
+                        const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+                        this.game.aiModeLogger.log('EMERGENCY', `${this.name} [P0]健康${Math.round(this.health)},在${this.currentScene}原地休息（不踢出室内） | ${snap}`);
+                    }
+                    if (!this._restCooldownTimer || this._restCooldownTimer <= 0) {
+                        this._restCooldownTimer = 60;
+                    }
+                }
+                return;
             }
             this._behaviorPriority = 'P0';
             // 【修复】健康危急导航到宿舍而非户外暖炉广场，避免NPC站在户外无法恢复
@@ -529,6 +552,28 @@
             // 【行为锁】如果当前行为即将完成(5秒内)，等待完成后再触发P0
             if (this.isEating && this.eatingTimer > 0 && this.eatingTimer < 5) {
                 this._logDebug('schedule', `[P0] 体力${Math.round(this.stamina)}但吃饭即将完成(${this.eatingTimer.toFixed(1)}s)，等待完成`);
+                return;
+            }
+            // 【修复v4.17】NPC已在室内场景（非village）时，不踢出室内跑回宿舍
+            // 而是暂停任务、原地进入休息状态，避免反复出门→回来→出门的弹弹乐循环
+            const isIndoor = this.currentScene && this.currentScene !== 'village';
+            if (isIndoor) {
+                // 室内体力不支：暂停任务、原地休息恢复体力（不离开当前室内场景）
+                this._behaviorPriority = 'P0';
+                this._pauseTaskOverride('stamina_critical', 'priority');
+                if (this._priorityOverride !== 'stamina_critical') {
+                    this._priorityOverride = 'stamina_critical';
+                    this.stateDesc = '体力不支，原地休息恢复中';
+                    this._logDebug('schedule', `[P0] 体力${Math.round(this.stamina)}，在${this.currentScene}室内原地休息（不踢出）`);
+                    if (this.game && this.game.aiModeLogger) {
+                        const snap = GST.AIModeLogger.npcAttrSnapshot(this);
+                        this.game.aiModeLogger.log('EMERGENCY', `${this.name} [P0]体力${Math.round(this.stamina)},在${this.currentScene}原地休息（不踢出室内） | ${snap}`);
+                    }
+                    // 触发原地休息恢复（类似白天rest）
+                    if (!this._restCooldownTimer || this._restCooldownTimer <= 0) {
+                        this._restCooldownTimer = 60; // 给予60秒休息缓冲
+                    }
+                }
                 return;
             }
             this._behaviorPriority = 'P0';
@@ -1140,7 +1185,11 @@
 
         // 如果该睡觉了但还不在家，强制导航回宿舍（避免在路上站着睡）
         // 【修复】CHATTING状态下不强制回家，等对话结束后再说
-        if (isSleepAction && !this._isAtHome() && !this.isSleeping && this.state !== 'CHATTING') {
+        // 【v4.18修复】如果NPC有活跃的任务覆盖(P1)或P0优先级覆盖(medical_urgent等)，
+        // 不从非宿舍室内踢出到村庄，否则会和P0/P1形成"弹弹乐"死循环
+        // （_updateSleepState先把NPC踢出室内→_updateSchedule P0/P1又把NPC送回→无限循环）
+        const hasActiveHighPriority = this._priorityOverride || (this._taskOverride && this._taskOverride.isActive);
+        if (isSleepAction && !this._isAtHome() && !this.isSleeping && this.state !== 'CHATTING' && !hasActiveHighPriority) {
             if (!this.isMoving && this.currentPath.length === 0) {
                 if (this.currentScene === 'village') {
                     // 在村庄里 → 走向宿舍门口，到达后自动进入
@@ -1151,8 +1200,9 @@
                         this._pendingEnterKey = homeDoorKey;
                         this._pathTo(homeDoorLoc.x, homeDoorLoc.y, this.game);
                     }
-                } else if (this.currentScene !== this.homeName) {
+                } else if (this.currentScene !== this.homeName && !hasActiveHighPriority) {
                     // 在其他室内 → 先传送出门到村庄
+                    // 【v4.18】但如果有P0/P1任务覆盖，不踢出（让NPC留在当前室内完成任务/就医）
                     const doorPos = this._getDoorPos();
                     this._teleportTo('village', doorPos.x, doorPos.y);
                 }
@@ -1274,7 +1324,7 @@
                         { kw: ['做饭','烹饪','炊事'], target: 'kitchen_door', res: null },
                         { kw: ['治疗','医疗','急救'], target: 'medical_door', res: null },
                         { kw: ['盘点','仓库'], target: 'warehouse_door', res: null },
-                        { kw: ['安抚','鼓舞','士气'], target: 'furnace_plaza', res: null },
+                        { kw: ['安抚','鼓舞','士气'], target: 'dorm_a_door', res: null },
                     ];
                     let matched = null;
                     for (const m of TARGET_MAP) {
@@ -1344,7 +1394,7 @@
                     explore: 'ruins_site',
                     power: 'workshop_door'
                 };
-                const fallbackKey = (override.resourceType && fallbackMap[override.resourceType]) || 'furnace_plaza';
+                const fallbackKey = (override.resourceType && fallbackMap[override.resourceType]) || 'dorm_a_door';
                 targetLoc = GST.SCHEDULE_LOCATIONS[fallbackKey];
                 if (targetLoc) {
                     override.targetLocation = fallbackKey;
@@ -1601,7 +1651,7 @@
                     explore: 'ruins_site',
                     power: 'workshop_door'
                 };
-                const fallback = (resourceType && fallbackMap[resourceType]) || 'furnace_plaza';
+                const fallback = (resourceType && fallbackMap[resourceType]) || 'dorm_a_door';
                 console.warn(`[NPC-${this.name}] 位置key "${validLocation}" 无效，回退到 "${fallback}"`);
                 validLocation = fallback;
             }

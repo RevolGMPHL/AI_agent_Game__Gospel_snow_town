@@ -1181,7 +1181,7 @@
                 }
             }
             // 暖炉广场
-            pts.push({ x: 25, y: 21, name: '主暖炉', desc: '去暖炉旁取暖', walkTo: { x: 25, y: 21 } });
+            pts.push({ x: 25, y: 21, name: '广场篝火', desc: '去广场篝火旁取暖', walkTo: { x: 25, y: 21 } });
             // 大门
             pts.push({ x: 25, y: 10, name: '北门', desc: '前往北门', walkTo: { x: 25, y: 10 } });
             pts.push({ x: 25, y: 30, name: '南门', desc: '前往南门', walkTo: { x: 25, y: 30 } });

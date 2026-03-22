@@ -284,7 +284,7 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
             // 显示第1天的分工详情
             if (workPlan.dayPlans && workPlan.dayPlans[1]) {
                 const nameMap = { zhao_chef: '赵铁柱', lu_chen: '陆辰', li_shen: '李婶', wang_teacher: '王策', old_qian: '老钱', su_doctor: '苏岩', ling_yue: '歆玥', qing_xuan: '清璇' };
-                const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞士气', BUILD_FURNACE: '建暖炉', PREPARE_WARMTH: '御寒', MAINTAIN_ORDER: '维持秩序', REST_RECOVER: '休息' };
+                const taskShort = { COLLECT_WOOD: '砍柴', COLLECT_FOOD: '采食物', COLLECT_MATERIAL: '探索废墟', MAINTAIN_POWER: '维护电力', COORDINATE: '统筹协调', PREPARE_MEDICAL: '医疗', SCOUT_RUINS: '侦察', BOOST_MORALE: '鼓舞士气', PREPARE_WARMTH: '御寒', MAINTAIN_ORDER: '维持秩序', REST_RECOVER: '休息' };
                 for (const a of workPlan.dayPlans[1]) {
                     const name = nameMap[a.npcId] || a.npcId;
                     const task = taskShort[a.task] || a.task;
@@ -990,7 +990,7 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
                     }
                 }
             }
-            // AI模式日志：每日总结（所有NPC属性快照）
+            // AI模式日志：每日总结（所有NPC属性快照 + 天气/难度）
             if (this.aiModeLogger && this.npcs.length > 0) {
                 const aliveNpcs = this.npcs.filter(n => !n.isDead);
                 const lines = aliveNpcs.map(npc => {
@@ -998,7 +998,19 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
                     return `  ${npc.name} | ${npc.state || '?'}/${npc.stateDesc || '?'} | ${snap} | ${npc.currentScene || '?'}`;
                 });
                 const deadCount = this.npcs.length - aliveNpcs.length;
-                this.aiModeLogger.log('DAY_SUMMARY', `第${this.dayCount}天开始 | 存活${aliveNpcs.length}人 死亡${deadCount}人:\n${lines.join('\n')}`);
+                // 天气和难度信息
+                let envInfo = '';
+                if (this.weatherSystem) {
+                    const ws = this.weatherSystem;
+                    envInfo += ` | 天气:${ws.currentWeather || '?'} 温度:${ws.currentTemp != null ? ws.currentTemp + '°C' : '?'}`;
+                    if (ws.dayConfig) {
+                        envInfo += ` 户外限制:${ws.dayConfig.outdoorTimeLimit || '?'}秒`;
+                    }
+                }
+                if (this.difficulty) {
+                    envInfo += ` | 难度:${this.difficulty.name || '?'}(${this.difficulty.stars || '?'})`;
+                }
+                this.aiModeLogger.log('DAY_SUMMARY', `第${this.dayCount}天开始${envInfo} | 存活${aliveNpcs.length}人 死亡${deadCount}人:\n${lines.join('\n')}`);
             }
             if (this.furnaceSystem && this.furnaceSystem.onDayChange) {
                 this.furnaceSystem.onDayChange(this.dayCount);
@@ -1359,6 +1371,35 @@ console.log(`🏘️ 福音镇已启动！模式: ${mode}`);
 
     reincarnate() {
         console.log('[Game] 🔄 轮回重生开始...');
+
+        // 0.5 轮回结束前：记录本世完整摘要日志（用于复盘）
+        if (this.aiModeLogger) {
+            let reincLog = `第${this.reincarnationSystem ? this.reincarnationSystem.currentLifeNumber : '?'}世轮回结束 | 存活${this.npcs.filter(n => !n.isDead).length}/${this.npcs.length}人\n`;
+            // 死亡记录
+            if (this.deathSystem && this.deathSystem.deathRecords && this.deathSystem.deathRecords.length > 0) {
+                reincLog += `  死亡记录:\n`;
+                for (const r of this.deathSystem.deathRecords) {
+                    reincLog += `    ${r.npcName} - ${r.cause} - D${r.dayNum} ${r.time}\n`;
+                }
+            }
+            // 最终资源
+            const rs = this.resourceSystem;
+            if (rs) {
+                reincLog += `  最终资源: 木柴:${rs.woodFuel != null ? rs.woodFuel.toFixed(1) : '?'} 食物:${rs.food != null ? rs.food.toFixed(1) : '?'} 电力:${rs.power != null ? rs.power.toFixed(1) : '?'}\n`;
+            }
+            // 所有NPC最终状态
+            reincLog += `  NPC状态:\n`;
+            for (const npc of this.npcs) {
+                const snap = GST.AIModeLogger.npcAttrSnapshot(npc);
+                reincLog += `    ${npc.name} | ${npc.isDead ? '已故' : '存活'} | ${snap}\n`;
+            }
+            this.aiModeLogger.log('REINCARNATE', reincLog);
+        }
+
+        // 0.8 轮回结束前：自动保存完整debug log
+        if (this._saveDebugLogToServer) {
+            this._saveDebugLogToServer(true);
+        }
 
         // 1. 保存当前世的轮回记忆
         if (this.reincarnationSystem) {

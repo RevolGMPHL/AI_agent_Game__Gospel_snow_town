@@ -14,7 +14,7 @@
     <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
     <img src="https://img.shields.io/badge/engine-HTML5%20Canvas-orange.svg" alt="Engine">
     <img src="https://img.shields.io/badge/AI-LLM%20驱动-green.svg" alt="AI">
-    <img src="https://img.shields.io/badge/version-v2.0-brightgreen.svg" alt="Version">
+    <img src="https://img.shields.io/badge/version-v4.18-brightgreen.svg" alt="Version">
     <img src="https://img.shields.io/badge/NPC-8%20位自主智能体-purple.svg" alt="NPCs">
   </p>
 </p>
@@ -58,12 +58,11 @@
 - **资源平衡** — 木柴、食物、电力、建材 — 必须精打细算对抗消耗
 
 ### 🔥 有意义的任务系统
-- **暖炉建造** — 第二座暖炉需要真实的 NPC 劳动、材料和时间
-- **无线电修理** — 进度追踪 0%→100%，完成后第 4 天可呼叫救援
+- **投票决策** — NPC 集体讨论投票，由 LLM 驱动多轮辩论选出最优生存方案
+- **自动化机器** — 建造发电机和伐木机，自动产出资源
 - **药品制作** — 急救包可救治受伤 NPC（+20 健康值）
-- **陷阱布置** — 激活夜间预警系统，提升全员士气
+- **废墟探索** — 侦察员在废墟中发现食物、木柴、电力和稀有物品
 - **没有假任务** — 每个任务都产生可验证的、切实的游戏效果
-
 ### 🔄 轮回系统
 - 全员死亡时世界重置但信息延续
 - 每个轮回递增「世数」
@@ -124,22 +123,24 @@ ollama pull qwen3:14b-q8_0
 
 ```
 gospel_snow_town/
-├── index.html              # 入口页面（生存状态栏 + 资源面板）
-├── game.js                 # 游戏主循环，集成所有子系统
-├── npc.js                  # NPC 系统（AI 思考、移动、属性、日程）
-├── maps.js                 # 程序化地图生成（村庄 + 9 个室内场景）
-├── dialogue.js             # 对话系统（NPC↔NPC、玩家↔NPC，LLM 驱动）
-├── weather-system.js       # 4 天温度循环 + 雪花粒子
-├── resource-system.js      # 木柴/食物/电力/建材管理 + 天气消耗缩放
-├── furnace-system.js       # 暖炉供暖 + 建造进度
-├── task-system.js          # NPC 专长 + 每日任务分配
-├── death-system.js         # 健康→死亡链路 + 4 种结局
-├── reincarnation-system.js # 死亡→重生循环 + 记忆延续
-├── event-system.js         # 冲突事件 + 调解机制
-├── style.css               # 冰霜暗色主题样式
-├── server.js               # Node.js 静态服务器
-├── asset/                  # 8 个角色的精灵图 + 头像
-└── guide/                  # 设计文档、更新日志、踩坑记录
+├── index.html                      # 入口页面
+├── style.css                       # 冰霜暗色主题样式
+├── server.js                       # Node.js 静态服务器
+│
+├── src/                            # 源码目录（按功能分层）
+│   ├── core/                       # 核心引擎（game / renderer / input / camera / constants / startup）
+│   ├── map/                        # 地图系统（base-map / village-map / indoor×7 / map-registry）
+│   ├── npc/                        # NPC 系统 Mixin（npc核心 + ai + 属性 + 渲染 + 日程 + 效果 + 专长）
+│   ├── systems/                    # 子系统（resource / furnace / weather / task / death / event / reincarnation / machine / council / difficulty）
+│   ├── dialogue/                   # 对话系统（dialogue-manager / dialogue-ui）
+│   ├── ai/                         # AI/LLM（llm-client / llm-status / aimode-logger）
+│   ├── ui/                         # UI 模块（hud）
+│   └── utils/                      # 工具函数（pathfinding / sprite-loader / helpers）
+│
+├── data/                           # 纯数据配置（NPC配置 / 日程 / 行动效果 / 地图数据）
+├── asset/                          # 8 个角色的精灵图 + 头像
+├── tools/                          # 工具脚本（Python / HTML / Shell）
+└── guide/                          # 设计文档、更新日志、踩坑记录
 ```
 
 ### 核心系统流程
@@ -210,7 +211,7 @@ graph TD
 | [05-ai.md](guide/05-ai.md) | LLM Prompt 工程与 AI 决策系统 |
 | [06-tech.md](guide/06-tech.md) | 技术架构与核心类设计 |
 | [08-changelog.md](guide/08-changelog.md) | 版本历史与 Bug 修复记录 |
-| [09-pitfalls.md](guide/09-pitfalls.md) | 18 个踩坑记录 & 16 条开发原则 |
+| [09-pitfalls.md](guide/09-pitfalls.md) | 54 个踩坑记录 & 54 条开发原则 |
 
 ---
 
@@ -224,11 +225,12 @@ graph TD
 - **寻路**: A* 算法 + BFS 目标修正
 
 ### 开发原则
-1. **每个任务目标必须有可验证的游戏效果** — 不允许假装做事
-2. **物资系统先设计消耗，再反推采集速率** — 不拍脑袋定数字
-3. **健康/死亡链路必须有明确的数值推演** — 写代码前先算数学
+1. **情报提供者，不做决策辅助者** — 系统只提供情报（前世记忆、资源数据、天气状况），绝不强制AI如何决策
+2. **每个任务目标必须有可验证的游戏效果** — 不允许假装做事
+3. **物资系统先设计消耗，再反推采集速率** — 不拍脑袋定数字
 4. **LLM 是不可靠的外部依赖** — 必须有 fallback、重试和熔断机制
 5. **Debug 可观测性是核心基础设施** — 看不到就等于不存在
+6. **统一行为仲裁** — 多系统控制NPC必须走优先级链（P0 > stateOverride > taskOverride > actionOverride > 日程）
 
 ---
 

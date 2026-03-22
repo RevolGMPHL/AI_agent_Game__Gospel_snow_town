@@ -4,6 +4,171 @@
 
 ---
 
+## v4.18 — 系统性修复NPC"弹弹乐"死循环 (2026-03-22)
+
+### 🎯 核心问题
+
+NPC 在深夜时段被 `_updateSleepState` 和 `_updateSchedule` 两个系统交替控制，形成"弹弹乐"无限循环：
+- `_updateSleepState`（先执行）：深夜检测到"该睡觉但不在家" → 把NPC从非宿舍室内踢出到village
+- `_updateSchedule`（后执行）：P0/P1检测到"NPC不在目标位置" → 又导航NPC回室内
+- 每帧循环一次，同一秒内可刷几十次进门
+
+**日志证据**：陆辰 **336次** 重复进门、清璇 **194次**、李婶 **108次**
+
+### 🐛 Bug修复（6处）
+
+#### 1. `_updateSleepState` 不从非宿舍室内踢出有P0/P1任务的NPC
+**修复**：`else if (this.currentScene !== this.homeName && !hasActiveHighPriority)` — 有 `_priorityOverride` 或 `_taskOverride` 时不踢出
+**改动**：`src/npc/npc-schedule.js`
+
+#### 2. `_updateSleepState` 整个"该睡觉但不在家"导航块在有P0/P1时跳过
+**修复**：外层 if 增加 `&& !hasActiveHighPriority` 条件，P0覆盖正在赶路时（如去medical），睡眠日程不打断
+**改动**：`src/npc/npc-schedule.js`
+
+#### 3. `_enterIndoor` 防抖
+**修复**：NPC已在目标场景中直接 return，不执行重复进门。兜底保护
+**改动**：`src/npc/npc.js`
+
+### 📝 代码改动
+- `src/npc/npc-schedule.js`: `_updateSleepState` 增加 `hasActiveHighPriority` 保护（2处）
+- `src/npc/npc.js`: `_enterIndoor` 入口防抖
+
+---
+
+## v4.17 — 苏岩弹弹乐修复 + 日志增强 + 探索数值明确 (2026-03-22)
+
+### 🎯 核心问题
+
+1. **苏岩(及其他NPC)在室内被反复踢出又拉回**：体力/健康低时P0/状态覆盖把NPC从医疗站/工坊踢出 → 恢复一点后任务覆盖又拉回 → 无限循环
+2. **日志系统**：断点续玩时无法区分"新存档"和"续玩存档"
+3. **探索废墟日志**：发现物品缺少具体数值（"发现罐头"但不知道加了多少食物）
+
+### 🐛 Bug修复（4处）
+
+#### 1. P0-4 `stamina_critical`：室内不踢出
+**问题**：NPC在医疗站体力低 → P0暂停任务导航回宿舍 → 到宿舍恢复 → 任务恢复回医疗站 → 又不够 → 循环
+**修复**：新增 `isIndoor` 检查，NPC在非village室内场景时暂停任务、原地休息不踢出
+**改动**：`src/npc/npc-schedule.js` P0-4分支
+
+#### 2. P0-3 `health_critical`：已在宿舍不触发 + 室内原地休息
+**问题**：NPC已在自己宿舍时健康低仍触发导航到宿舍门口 → 出门 → 又进门 → 循环
+**修复**：新增 `isInHomeDorm` 检查跳过；非village室内场景原地休息不踢出
+**改动**：`src/npc/npc-schedule.js` P0-3分支
+
+#### 3. `exhausted` 状态覆盖：室内不触发
+**问题**：NPC在医疗站/工坊体力低 → exhausted驱动回宿舍 → 到宿舍恢复 → 任务恢复回 → 循环
+**修复**：新增 `!isInIndoorScene` 检查，已在非village室内时不触发exhausted
+**改动**：`src/npc/npc-attributes.js`
+
+#### 4. `sick`/`mental` 状态覆盖：已在medical不触发
+**问题**：NPC已在医疗站，但sick/mental仍触发 → 重复导航
+**修复**：新增 `this.currentScene !== 'medical'` 条件
+**改动**：`src/npc/npc-attributes.js`
+
+### ✨ 增强
+
+#### 5. 日志系统：断点续玩标记
+- `_writeHeader()` 增加断点续玩检测，session header中追加 `⚠️ 断点续玩恢复` 信息
+- 新增 `logContinueInfo()` 方法，记录续玩时的世数、天数、资源、存活人数
+**改动**：`src/ai/aimode-logger.js`、`src/core/startup.js`
+
+#### 6. 轮回模式启动：自动检测存档
+- 轮回模式按钮点击时自动检测是否有同模式存档，有则走断点续玩路径
+**改动**：`src/core/startup.js`
+
+#### 7. 探索废墟日志增加具体数值
+- 改动前：`歆玥 探索废墟: 🥫 发现罐头 (今日1/3)`
+- 改动后：`歆玥 探索废墟: 🥫 发现罐头 → 食物+15 (今日1/3, 剩余2次)`
+**改动**：`src/systems/resource-system.js`
+
+### 📝 代码改动
+- `src/npc/npc-schedule.js`: P0-3 health_critical（isInHomeDorm+室内原地休息）、P0-4 stamina_critical（室内检测+原地休息）
+- `src/npc/npc-attributes.js`: exhausted（!isInIndoorScene）、sick（!=='medical'）、mental（!=='medical'）
+- `src/ai/aimode-logger.js`: _writeHeader断点续玩标记、logContinueInfo()
+- `src/core/startup.js`: _isContinueSession标记、轮回模式自动检测存档
+- `src/systems/resource-system.js`: 探索废墟日志增加资源类型和数量
+
+---
+
+## v4.16 — 精神恢复系统修复 + 物资充足时NPC自主决策 (2026-03-21)
+
+### 🎯 核心问题
+
+**问题1**：从截图中看到第16~17世资源超级充足（🔥714 🥩19 ⚡411）但全员精神崩溃致死。
+**问题2**：NPC不知道物资够用，被死板的日程/安排表绑死，即使物资充足也一直干活不休息。
+
+### 🐛 Bug修复（精神恢复系统）
+
+#### 1. 白天rest不恢复San（核心Bug）
+**问题**：NPC白天选择rest回家，`_restCooldownTimer`缓冲期只恢复体力（`stamina + 2*dt`），**完全没有San恢复**！只有`isSleeping=true`才恢复San，而白天rest不是isSleeping。
+**修复**：白天rest缓冲期增加San恢复 `+0.06/dt`（与社交`+0.12`类似但低一些）。
+**改动**：`src/npc/npc.js` L1076
+
+#### 2. 白天rest缓冲期仍被San自然衰减扣减
+**问题**：即使NPC在家休息中（`_restCooldownTimer > 0`），清醒时的自然衰减（`-0.02/dt`）和恶性循环（`-0.03*dt`）仍在持续扣San。导致白天休息几乎无法有效恢复精神。
+**修复**：白天rest缓冲期中跳过自然衰减和恶性循环，让休息真正有效。
+**改动**：`src/npc/npc-attributes.js` naturalDecay + 恶性循环判断
+
+#### 3. 白天rest被拦截太严格
+**问题**：`reallyNeedRest`条件为`sanity < 35`才允许白天rest，San在35~50的NPC被拦截赶去干活→San继续掉→恶性循环。
+**修复**：放宽为`sanity < 50`允许休息，体力阈值从`<15`提升到`<25`。
+**改动**：`src/npc/npc-ai.js` L1455
+
+### ✨ 增强
+
+#### 4. Prompt信息增强：物资充足度 + 精神恢复提示
+- 资源紧张度"正常"改为"正常，物资充足"，让NPC知道不需要拼命干活
+- San<50时action prompt增加提示"精神状态不佳时，回家休息或找人聊天都能恢复精神"
+- 注意：这是**信息提供**，不是决策辅助，完全遵循核心设计原则
+**改动**：`src/npc/npc-ai.js`、`src/npc/npc-renderer.js`
+
+### 📊 数值影响分析
+
+**修改前（白天rest 1小时）**：
+- 体力恢复 +2*dt*3600 ≈ +120（有效）
+- San变化 = 0（无恢复）- 0.02*dt（自然衰减）- 0.03*dt（恶性循环） ≈ **-5点/h**（越休息越差！）
+
+**修改后（白天rest 1小时）**：
+- 体力恢复 +2*dt*3600 ≈ +120（不变）
+- San变化 = +0.06*dt（rest恢复）- 0（跳过自然衰减）- 0（跳过恶性循环） ≈ **+3.6点/h**（有效恢复）
+
+### 📝 代码改动
+- `src/npc/npc.js`: 白天rest缓冲期增加San恢复 `+0.06*dt`
+- `src/npc/npc-attributes.js`: 白天rest缓冲期跳过自然衰减和恶性循环
+- `src/npc/npc-ai.js`: rest拦截阈值放宽（San<35→<50，体力<15→<25）+ 资源紧张度提示增强 + San低时增加rest/社交提示
+- `src/npc/npc-renderer.js`: 资源紧张度"正常"→"正常，物资充足"
+
+### ✨ 新功能：物资充足时NPC自主决策
+
+#### 核心理念
+遵循设计原则"只做情报的提供者，不做决策的辅助者"：当物资充足、机器修好时，在prompt中注入综合态势评估（如"物资充足，发电机和伐木机都在自动运转，你可以自由安排时间"），让LLM自己去想他们要干什么。
+
+#### 1. 新增 `getResourceSituationBrief()` 方法
+在resource-system中新增综合态势评估方法，根据资源紧张度+机器状态+供暖状态+人员状况，生成一段自然语言描述。
+**改动**：`src/systems/resource-system.js`
+
+示例输出（物资充足时）：
+```
+📊【当前态势】物资充足（木柴够48小时，食物够12餐，电力够36小时），发电机和伐木机都在自动运转。供暖稳定。
+当前不需要紧急采集。你可以自由安排时间——休息恢复精力、找人聊天社交、探索废墟、或者做任何你觉得有意义的事。
+```
+
+#### 2. 废除"必须严格执行工作安排表"的强制规则
+- think prompt规则4：从"🎯最高优先 你必须严格执行工作安排表"→"工作安排表供你参考，物资充足时完全可以自主决定做什么"
+- action prompt规则2：从"🎯最高优先 不要擅自偏离"→"当资源紧张时积极执行，物资充足时自主决定"
+- action prompt规则3：从"应该优先完成任务"→"参考信息，根据当前态势自行判断"
+- action prompt规则9：新增强调"物资充足时可以选择休息、聊天、探索"
+**改动**：`src/npc/npc-ai.js`、`src/npc/npc-renderer.js`
+
+#### 设计原则
+- ✅ 综合态势评估是**信息提供**（"物资充足，发电机在运转"）
+- ✅ 没有任何"你应该去休息"之类的决策辅助
+- ✅ 日程表和任务仅标注为"参考"
+- ✅ LLM完全自主决策要干什么
+
+### 📝 完整代码改动清单
+---
+
 ## v4.15 — 5倍速整体适配：统一游戏时间与真实时间语义 (2026-03-21)
 
 ### 🎯 核心改动：高倍速下保持“推进更快”，但不让安全计时器失真

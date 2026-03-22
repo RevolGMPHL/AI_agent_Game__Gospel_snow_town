@@ -540,6 +540,7 @@ window.addEventListener('load', () => {
 
             // 断点续玩：如果是continue模式，创建游戏后加载存档
             if (isContinue) {
+                window.game._isContinueSession = true;  // 标记断点续玩
                 const loaded = window.game.load();
                 if (loaded) {
                     console.log('[启动] 断点续玩：存档加载成功');
@@ -547,8 +548,13 @@ window.addEventListener('load', () => {
                     // 同步UI
                     window.game._updateReincarnationUI();
                     window.game._updateSidebar();
+                    // 日志系统记录断点续玩恢复信息
+                    if (window.game.aiModeLogger) {
+                        window.game.aiModeLogger.logContinueInfo();
+                    }
                 } else {
                     console.warn('[启动] 断点续玩：存档加载失败，从头开始');
+                    window.game._isContinueSession = false;
                 }
             }
 
@@ -658,8 +664,15 @@ npc.activateTaskOverride(`debug_${areaKey}`, areaKey, 'urgent', areaKey === 'lum
         const isResetting = chkReset && chkReset.checked;
 
         if (lifeNum > 1 && !isResetting) {
-            // 轮回中途：使用已保存的难度，直接启动
-            startGame('reincarnation');
+            // 轮回中途：检测是否有同模式存档，有则自动断点续玩（避免丢失中途进度）
+            const si = GST.Game ? GST.Game.getSaveInfo() : null;
+            if (si && si.mode === 'reincarnation') {
+                console.log(`[启动] 轮回模式检测到存档（第${si.day}天 ${si.timeStr}），自动断点续玩`);
+                startGame('_continue_');
+            } else {
+                // 无存档或存档模式不匹配，正常启动新世代
+                startGame('reincarnation');
+            }
         } else {
             // 新轮回或重置：先保存选中的难度key到临时变量，startGame中清除后再写入
             startGame('reincarnation', selectedDifficultyKey);

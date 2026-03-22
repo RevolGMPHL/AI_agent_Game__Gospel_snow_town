@@ -622,6 +622,11 @@ class DeathSystem {
             this.game.aiModeLogger.forceFlush();
         }
 
+        // 结局时自动保存完整debug log（用于复盘）
+        if (this.game._saveDebugLogToServer) {
+            this.game._saveDebugLogToServer(true);
+        }
+
         // 暂停游戏
         this.game.paused = true;
 

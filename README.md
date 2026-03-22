@@ -14,7 +14,7 @@
     <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
     <img src="https://img.shields.io/badge/engine-HTML5%20Canvas-orange.svg" alt="Engine">
     <img src="https://img.shields.io/badge/AI-LLM%20Powered-green.svg" alt="AI">
-    <img src="https://img.shields.io/badge/version-v2.0-brightgreen.svg" alt="Version">
+    <img src="https://img.shields.io/badge/version-v4.18-brightgreen.svg" alt="Version">
     <img src="https://img.shields.io/badge/NPCs-8%20Autonomous%20Agents-purple.svg" alt="NPCs">
   </p>
 </p>
@@ -58,10 +58,10 @@ If everyone dies — the world **reincarnates**. NPCs carry faint memories from 
 - **Resource Balance** — Wood, food, power, materials — all must be carefully managed against consumption
 
 ### 🔥 Meaningful Task System
-- **Furnace Construction** — Building a second furnace requires real NPC labor, materials, and time
-- **Radio Repair** — Progressive repair tracked 0%→100%, unlocks rescue on Day 4
+- **Voting Council** — NPCs collectively debate and vote on survival strategies via LLM-driven multi-round discussion
+- **Automated Machines** — Build generators and lumber mills that auto-produce resources
 - **Medicine Crafting** — First aid kits heal injured NPCs (+20 health)
-- **Trap Setting** — Activates night warning system, boosts group morale
+- **Ruins Exploration** — Scouts find food, wood, power, and rare items in the ruins
 - **No Fake Tasks** — Every task produces verifiable, tangible game effects
 
 ### 🔄 Reincarnation System
@@ -124,22 +124,24 @@ ollama pull qwen3:14b-q8_0
 
 ```
 gospel_snow_town/
-├── index.html              # Entry point (survival HUD + resource panel)
-├── game.js                 # Main game loop, integrates all subsystems
-├── npc.js                  # NPC system (AI think, movement, attributes, schedules)
-├── maps.js                 # Procedural map generation (village + 9 interiors)
-├── dialogue.js             # Dialogue system (NPC↔NPC, player↔NPC, LLM-driven)
-├── weather-system.js       # 4-day temperature cycle + snow particles
-├── resource-system.js      # Wood/food/power/material management + weather scaling
-├── furnace-system.js       # Furnace heating + construction progress
-├── task-system.js          # NPC specializations + daily task assignment
-├── death-system.js         # Health→death chain + 4 endings
-├── reincarnation-system.js # Death→rebirth cycle + memory carry-over
-├── event-system.js         # Conflict events + mediation mechanics
-├── style.css               # Frostbite dark theme
-├── server.js               # Node.js static server
-├── asset/                  # Sprite sheets + portraits for 8 characters
-└── guide/                  # Design docs, changelog, pitfall records
+├── index.html                      # Entry point
+├── style.css                       # Frostbite dark theme
+├── server.js                       # Node.js static server
+│
+├── src/                            # Source code (layered by function)
+│   ├── core/                       # Core engine (game / renderer / input / camera / constants / startup)
+│   ├── map/                        # Map system (base-map / village-map / indoor×7 / map-registry)
+│   ├── npc/                        # NPC system Mixin (npc + ai + attributes + renderer + schedule + effects + specialty)
+│   ├── systems/                    # Subsystems (resource / furnace / weather / task / death / event / reincarnation / machine / council / difficulty)
+│   ├── dialogue/                   # Dialogue system (dialogue-manager / dialogue-ui)
+│   ├── ai/                         # AI/LLM (llm-client / llm-status / aimode-logger)
+│   ├── ui/                         # UI modules (hud)
+│   └── utils/                      # Utilities (pathfinding / sprite-loader / helpers)
+│
+├── data/                           # Pure data configs (NPC configs / schedules / action effects / map data)
+├── asset/                          # Sprites + portraits for 8 characters
+├── tools/                          # Utility scripts (Python / HTML / Shell)
+└── guide/                          # Design docs, changelog, pitfall records
 ```
 
 ### Core System Flow
@@ -210,7 +212,7 @@ Detailed design documents are available in the `guide/` directory:
 | [05-ai.md](guide/05-ai.md) | LLM prompt engineering & AI decision system |
 | [06-tech.md](guide/06-tech.md) | Technical architecture & class design |
 | [08-changelog.md](guide/08-changelog.md) | Version history & bug fixes |
-| [09-pitfalls.md](guide/09-pitfalls.md) | 18 pitfalls & 16 development principles |
+| [09-pitfalls.md](guide/09-pitfalls.md) | 54 pitfalls & 54 development principles |
 
 ---
 
@@ -224,11 +226,12 @@ Detailed design documents are available in the `guide/` directory:
 - **Pathfinding**: A* algorithm with BFS target correction
 
 ### Design Principles
-1. **Every task must have verifiable game effects** — no fake busywork
-2. **Resource balance: design consumption first, then derive gathering rates**
-3. **Health→Death chain must have explicit numerical progression**
+1. **Intelligence provider, not decision assistant** — System only provides intel (memories, resources, weather), never forces AI decisions
+2. **Every task must have verifiable game effects** — no fake busywork
+3. **Resource balance: design consumption first, then derive gathering rates**
 4. **LLM is an unreliable dependency** — always have fallback, retry, and circuit breaker
 5. **Debug observability is core infrastructure** — if you can't see it in debug panel, it doesn't exist
+6. **Unified behavior arbitration** — Multiple systems controlling NPC must go through priority chain (P0 > stateOverride > taskOverride > actionOverride > schedule)
 
 ---
 

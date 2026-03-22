@@ -144,15 +144,15 @@
 
         // 状态提示
         const hints = [];
-        if (npc.isHypothermic) hints.push({ text: '🥶 失温中！行动迟缓，体力快速下降，必须立即回暖炉旁！', cls: 'warn' });
+if (npc.isHypothermic) hints.push({ text: '🥶 失温中！行动迟缓，体力快速下降，必须立即回室内取暖！', cls: 'warn' });
         if (npc.isSevereHypothermic) hints.push({ text: '🧊 严重失温！倒地不起，需要紧急救援！', cls: 'warn' });
         if (npc.isFrostbitten) hints.push({ text: '🫨 手脚冻伤，需要治疗', cls: 'warn' });
         if (npc.isSick) hints.push({ text: '🤒 正在生病中，需要休息或去医院看病', cls: 'warn' });
         if (npc.isCrazy) hints.push({ text: '🤯 精神崩溃发疯中！需要找苏医生治疗或睡觉恢复', cls: 'warn' });
-        if (npc.isWatchingShow) hints.push({ text: '🎵 正在看歆玥的演出，San值恢复中', cls: 'good' });
-        if (npc.isInTherapy) hints.push({ text: '💬 正在接受苏医生心理咨询，San值快速恢复中', cls: 'good' });
+        if (npc.isWatchingShow) hints.push({ text: '🎵 受到歆玥的鼓舞，精神状态恢复中', cls: 'good' });
+        if (npc.isInTherapy) hints.push({ text: '💬 正在接受苏岩的心理疏导，精神状态恢复中', cls: 'good' });
         if (npc.stamina < 20) hints.push({ text: '⚠️ 体力极低，急需休息', cls: 'warn' });
-        if (npc.sanity < 30 && !npc.isCrazy) hints.push({ text: '🧠 精神状态很差，建议去医院找苏医生咨询或看歆玥演出', cls: 'warn' });
+        if (npc.sanity < 30 && !npc.isCrazy) hints.push({ text: '🧠 精神状态很差，需要想办法恢复精神', cls: 'warn' });
         if (npc.health < 30) hints.push({ text: '⚠️ 健康状况很差，容易生病', cls: 'warn' });
         if (npc.stamina >= 80) hints.push({ text: '💪 精力充沛，做事效率高', cls: 'good' });
         if (npc.sanity >= 80) hints.push({ text: '🧠 精神充沛，头脑清晰', cls: 'good' });
@@ -707,7 +707,7 @@ const resp = await fetch('http://localhost:8080/api/save-debug-log', {
                             <span class="past-life-stat">🍞 <span class="past-life-stat-val">${res.food}</span></span>
                             <span class="past-life-stat">⚡ <span class="past-life-stat-val">${res.power}</span></span>
                 <span class="past-life-stat">🔍 <span class="past-life-stat-val">探索</span></span>
-                            <span class="past-life-stat">🔥 第二暖炉 <span class="past-life-stat-val">${life.secondFurnaceBuilt ? '✅' : '❌'}</span></span>
+                <span class="past-life-stat">🌡️ 供暖 <span class="past-life-stat-val">${life.heatingStrength !== undefined ? Math.round(life.heatingStrength * 100) + '%' : '—'}</span></span>
                         </div>
                     `;
                 }
@@ -889,19 +889,18 @@ const resp = await fetch('http://localhost:8080/api/save-debug-log', {
             survAliveEl.className = 'surv-value' + (aliveCount <= 4 ? ' danger' : '');
         }
         if (survFurnaceEl && this.furnaceSystem) {
-            const active = this.furnaceSystem.getActiveFurnaceCount();
-            const total = this.furnaceSystem.furnaces.length;
-            let furnaceText;
-            if (total === 1 && !this.furnaceSystem.secondFurnaceBuilt) {
-                furnaceText = active > 0 ? '1座(运转中)' : '1座(已熄灭)';
+            const fs = this.furnaceSystem;
+            const pct = Math.round(fs.heatingStrength * 100);
+            const label = fs.getHeatingLevelLabel();
+            survFurnaceEl.textContent = `${pct}%(${label})`;
+            // 颜色提示：稳定=绿，吃紧=黄，危险/失效=红
+            if (fs.heatingStatus === 'stable') {
+                survFurnaceEl.className = 'surv-value';
+            } else if (fs.heatingStatus === 'strained') {
+                survFurnaceEl.className = 'surv-value cold';
             } else {
-                furnaceText = `${total}座(${active}运转)`;
+                survFurnaceEl.className = 'surv-value danger';
             }
-            if (this.furnaceSystem.isBuildingSecondFurnace) {
-                const pct = Math.round(this.furnaceSystem.buildProgress * 100);
-                furnaceText += ` 🔨建造${pct}%`;
-            }
-            survFurnaceEl.textContent = furnaceText;
         }
 
         // ============ 资源面板更新 ============
@@ -1095,7 +1094,7 @@ const resp = await fetch('http://localhost:8080/api/save-debug-log', {
             if (statusEl) {
                 const roleIcons = { worker: '🔨', engineer: '🔧', support: '📋', special: '⭐' };
                 const roleIcon = roleIcons[npc.config.role] || '';
-                statusEl.textContent = `${roleIcon} ${npc.occupation} · ${npc.getStatusLine()}${npc.isCrazy ? ' · 🤯发疯中' : ''}${npc.isHypothermic ? ' · 🥶失温' : ''}${npc.isWatchingShow ? ' · 🎵看演出' : ''}${npc.isInTherapy ? ' · 💬咨询中' : ''}`;
+                statusEl.textContent = `${roleIcon} ${npc.occupation} · ${npc.getStatusLine()}${npc.isCrazy ? ' · 🤯发疯中' : ''}${npc.isHypothermic ? ' · 🥶失温' : ''}${npc.isWatchingShow ? ' · 🎵受鼓舞' : ''}${npc.isInTherapy ? ' · 💬疏导中' : ''}`;
             }
             // 更新迷你属性条 — 添加体温
             const attrsEl = document.getElementById(`attrs-${npc.id}`);

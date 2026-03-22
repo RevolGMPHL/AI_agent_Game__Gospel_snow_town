@@ -39,15 +39,22 @@ class AIModeLogger {
      */
     _writeHeader() {
         const now = new Date();
-        const header = [
+        const headerLines = [
             '========================================',
             `  AI模式运行日志`,
             `  启动时间: ${now.toLocaleString('zh-CN')}`,
             `  游戏模式: ${this.game.mode}`,
             `  会话文件: ${this.sessionFilename}`,
-            '========================================',
-            ''
-        ].join('\n');
+        ];
+        // 如果是断点续玩，追加恢复信息
+        if (this.game._isContinueSession) {
+            const dayNum = this.game.dayCount || 1;
+            const timeStr = this.game.getTimeStr ? this.game.getTimeStr() : '??:??';
+            const lifeNum = this.game.reincarnationSystem ? this.game.reincarnationSystem.getLifeNumber() : '?';
+            headerLines.push(`  ⚠️ 断点续玩恢复：从 D${dayNum} ${timeStr} 继续（第${lifeNum}世）`);
+        }
+        headerLines.push('========================================', '');
+        const header = headerLines.join('\n');
 
         fetch('/api/save-aimode-log', {
             method: 'POST',
@@ -101,6 +108,24 @@ class AIModeLogger {
      */
     forceFlush() {
         this._flush();
+    }
+
+    /**
+     * 记录断点续玩恢复信息（在load()成功后调用）
+     */
+    logContinueInfo() {
+        const game = this.game;
+        const dayNum = game.dayCount || 1;
+        const timeStr = game.getTimeStr ? game.getTimeStr() : '??:??';
+        const lifeNum = game.reincarnationSystem ? game.reincarnationSystem.getLifeNumber() : '?';
+        const rs = game.resourceSystem;
+        let resStr = '';
+        if (rs) {
+            resStr = ` | 资源:木柴${rs.woodFuel != null ? rs.woodFuel.toFixed(1) : '?'} 食物${rs.food != null ? rs.food.toFixed(1) : '?'} 电力${rs.power != null ? rs.power.toFixed(1) : '?'}`;
+        }
+        const alive = game.npcs ? game.npcs.filter(n => !n.isDead).length : '?';
+        const total = game.npcs ? game.npcs.length : '?';
+        this.log('CONTINUE', `💾 断点续玩恢复 | 第${lifeNum}世 D${dayNum} ${timeStr} | 存活${alive}/${total}${resStr}`);
     }
 
     /**

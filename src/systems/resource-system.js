@@ -32,8 +32,8 @@ const RUINS_MAX_EXPLORES_PER_DAY = 3;
 
 // ============ 资源消耗速率配置（每游戏小时） ============
 const RESOURCE_CONSUMPTION = {
-    woodPerFurnacePerHour: 0.8,   // 每座暖炉每小时消耗木柴（基础值，会被实时温度乘数调整）
-    powerPerHour: 2.0,            // 发电机每小时消耗电力【v2.1上调：从0.5→2.0，让电力有真正的消耗压力】
+    heatingWoodPerHour: 0.8,      // 集中供暖每小时基础消耗木柴（会被实时温度乘数调整）
+    powerPerHour: 2.0,            // 全镇基础电力维持消耗【v2.1上调：从0.5→2.0，让电力有真正的消耗压力】
     foodPerMealPerPerson: 1.5,    // 每人每餐消耗食物（集体用餐+个人进食都使用此值）
     mealsPerDay: 2,               // 每天2餐（8:00早餐, 18:00晚餐）
 };
@@ -288,39 +288,30 @@ class ResourceSystem {
         const aliveNpcCount = this.game.npcs ? this.game.npcs.filter(n => !n.isDead).length : 8;
         const populationRatio = Math.max(0.3, aliveNpcCount / totalNpcCount);
 
-        // 1) 暖炉消耗木柴（通过FurnaceSystem管理），应用天气乘数
-        const furnaceSystem = this.game.furnaceSystem;
-        if (furnaceSystem) {
-            const activeFurnaces = furnaceSystem.getActiveFurnaceCount();
-            if (activeFurnaces > 0) {
-                const baseWood = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * activeFurnaces * hourFraction;
-                // 【难度系统】木柴消耗乘以难度倍率
-                const diffConsWood = this.game.getDifficultyMult ? this.game.getDifficultyMult('consumptionMult') : null;
-                const diffWoodMult = (diffConsWood && diffConsWood.wood) ? diffConsWood.wood : 1.0;
-                let woodNeeded = baseWood * weatherMult.wood * diffWoodMult * populationRatio; // 【v4.1】人少消耗降低
+        // 1) 集中供暖消耗木柴，应用天气乘数
+        const heatingSystem = this.game.furnaceSystem;
+        if (heatingSystem) {
+            const baseWood = RESOURCE_CONSUMPTION.heatingWoodPerHour * hourFraction;
+            // 【难度系统】木柴消耗乘以难度倍率
+            const diffConsWood = this.game.getDifficultyMult ? this.game.getDifficultyMult('consumptionMult') : null;
+            const diffWoodMult = (diffConsWood && diffConsWood.wood) ? diffConsWood.wood : 1.0;
+            let woodNeeded = baseWood * weatherMult.wood * diffWoodMult * populationRatio;
 
-                // 维护暖炉已移除（v4.13: 暖炉是被动系统，自动燃烧消耗木柴，不需要人维护）
-
-                // 【仓库管理】有NPC在执行reduce_waste效果时，木柴浪费减少10%
-                if (this.game._woodWasteReduction) {
-                    woodNeeded *= 0.9;
-                    this.game._woodWasteReduction = false;
-                }
-
-                // 【v2.1电力与木柴联动】有电时省柴20%，无电时耗柴+30%
-                if (this.power > 0) {
-                    woodNeeded *= 0.8; // 有电：电加热辅助，省柴20%
-                } else {
-                    woodNeeded *= 1.3; // 无电：纯靠烧柴，耗柴+30%
-                }
-
-                const consumed = this.consumeResource('woodFuel', woodNeeded, '暖炉消耗');
-
-                // 如果木柴不够，通知暖炉系统
-                if (consumed < woodNeeded && this.woodFuel <= 0) {
-                    furnaceSystem.onFuelDepleted();
-                }
+            // 【仓库管理】有NPC在执行reduce_waste效果时，木柴浪费减少10%
+            if (this.game._woodWasteReduction) {
+                woodNeeded *= 0.9;
+                this.game._woodWasteReduction = false;
             }
+
+            // 电力会影响供暖效率：有电更省柴，无电则更费柴
+            if (this.power > 0) {
+                woodNeeded *= 0.8;
+            } else {
+                woodNeeded *= 1.3;
+            }
+
+            this.consumeResource('woodFuel', woodNeeded, '集中供暖');
+            heatingSystem.onFuelDepleted();
         }
 
         // 2) 发电机消耗电力，应用天气乘数 + 人口缩减系数
@@ -379,19 +370,18 @@ class ResourceSystem {
 
         // 向事件日志发送天气消耗变化提示
         if (this.game.addEvent) {
-            const furnaceCount = this.game.furnaceSystem ? this.game.furnaceSystem.getActiveFurnaceCount() : 1;
-            const baseWoodPerHour = RESOURCE_CONSUMPTION.woodPerFurnacePerHour * furnaceCount;
+            const baseWoodPerHour = RESOURCE_CONSUMPTION.heatingWoodPerHour;
             const actualWoodPerHour = baseWoodPerHour * mult.wood;
             const basePowerPerHour = RESOURCE_CONSUMPTION.powerPerHour;
             const actualPowerPerHour = basePowerPerHour * mult.power;
 
             const foodMultInfo = mult.food > 1.0 ? `，食物消耗×${mult.food}` : '';
             if (mult.wood > 1.0) {
-                this.game.addEvent(`🌡️❄️ 气温骤降，暖炉消耗增加！木柴消耗: ${actualWoodPerHour.toFixed(1)}/时（×${mult.wood}），电力消耗: ${actualPowerPerHour.toFixed(1)}/时（×${mult.power}）${foodMultInfo}`);
+                this.game.addEvent(`🌡️❄️ 气温骤降，集中供暖负荷增加！木柴消耗: ${actualWoodPerHour.toFixed(1)}/时（×${mult.wood}），电力消耗: ${actualPowerPerHour.toFixed(1)}/时（×${mult.power}）${foodMultInfo}`);
             } else if (mult.wood < 1.0) {
-                this.game.addEvent(`🌡️☀️ 气温回升，暖炉消耗降低！木柴消耗: ${actualWoodPerHour.toFixed(1)}/时（×${mult.wood}），电力消耗: ${actualPowerPerHour.toFixed(1)}/时（×${mult.power}）${foodMultInfo}`);
+                this.game.addEvent(`🌡️☀️ 气温回升，供暖压力减轻！木柴消耗: ${actualWoodPerHour.toFixed(1)}/时（×${mult.wood}），电力消耗: ${actualPowerPerHour.toFixed(1)}/时（×${mult.power}）${foodMultInfo}`);
             } else {
-                this.game.addEvent(`🌡️ 天气变化，当前木柴消耗: ${actualWoodPerHour.toFixed(1)}/时，电力消耗: ${actualPowerPerHour.toFixed(1)}/时${foodMultInfo}`);
+                this.game.addEvent(`🌡️ 天气变化，当前供暖木柴消耗: ${actualWoodPerHour.toFixed(1)}/时，电力消耗: ${actualPowerPerHour.toFixed(1)}/时${foodMultInfo}`);
             }
         }
     }
@@ -537,10 +527,10 @@ class ResourceSystem {
             if (!this._lastPowerOutTime || now - this._lastPowerOutTime > 60000) {
                 this._lastPowerOutTime = now;
                 if (this.game.addEvent) {
-                    this.game.addEvent(`🚨 电力耗尽！暖炉耗柴增加30%！医疗效率减半！夜间更加恐惧！`);
+                    this.game.addEvent(`🚨 电力耗尽！供暖耗柴增加30%！医疗效率减半！夜间更加恐惧！`);
                 }
                 if (this.game.aiModeLogger) {
-                    this.game.aiModeLogger.log('RESOURCE_CRISIS', `电力耗尽! 暖炉耗柴+30%,医疗效率×0.5,夜间San×2`);
+                    this.game.aiModeLogger.log('RESOURCE_CRISIS', `电力耗尽! 供暖耗柴+30%,医疗效率×0.5,夜间San×2`);
                 }
             }
         }
@@ -566,14 +556,14 @@ class ResourceSystem {
             }
         }
 
-        // 木柴耗尽 → 暖炉熄灭
+        // 木柴耗尽 → 集中供暖失效
         if (this.crisisFlags.noWoodFuel && !oldFlags.noWoodFuel) {
             if (this.game.addEvent) {
-                this.game.addEvent(`🚨 木柴耗尽！暖炉即将熄灭！`);
+                this.game.addEvent(`🚨 木柴耗尽！集中供暖几乎失效！`);
             }
             // AI模式日志：木柴耗尽危机
             if (this.game.aiModeLogger) {
-                this.game.aiModeLogger.log('RESOURCE_CRISIS', `木柴耗尽,暖炉熄灭! 当前食物:${this.food.toFixed(1)} 电力:${this.power.toFixed(1)}`);
+                this.game.aiModeLogger.log('RESOURCE_CRISIS', `木柴耗尽,集中供暖失效! 当前食物:${this.food.toFixed(1)} 电力:${this.power.toFixed(1)}`);
             }
         }
     }
@@ -813,6 +803,73 @@ class ResourceSystem {
         }
 
         return status;
+    }
+
+    /**
+     * 【v4.16新增】物资综合态势评估 — 用自然语言告诉NPC当前生存条件如何
+     * 核心原则：只提供信息，不做决策辅助
+     * 返回格式：一段简短的态势描述 + 事实信息
+     */
+    getResourceSituationBrief() {
+        const tension = this.getResourceTension();
+        const woodH = this.getWoodFuelHoursRemaining();
+        const foodM = this.getFoodMealsRemaining();
+        const powerH = this.getPowerHoursRemaining();
+        
+        // 机器状态
+        const ms = this.game.machineSystem;
+        const generatorOk = ms && ms.generator.built && ms.generator.running && !ms.generator.broken;
+        const lumberMillOk = ms && ms.lumberMill.built && ms.lumberMill.running && !ms.lumberMill.broken;
+        const hasMachines = generatorOk || lumberMillOk;
+        
+        // 供暖状态
+        const fs = this.game.furnaceSystem;
+        const heatingOk = fs && fs.heatingStatus === 'stable';
+        
+        // 综合评估
+        let brief = '';
+        
+        if (tension < 0.05 && hasMachines) {
+            brief = `📊【当前态势】物资充足（木柴够${Math.round(woodH)}小时，食物够${foodM}餐，电力够${Math.round(powerH)}小时），`;
+            if (generatorOk && lumberMillOk) {
+                brief += '发电机和伐木机都在自动运转。';
+            } else if (generatorOk) {
+                brief += '发电机在自动运转。';
+            } else if (lumberMillOk) {
+                brief += '伐木机在自动运转。';
+            }
+            if (heatingOk) brief += '供暖稳定。';
+            brief += '\n当前不需要紧急采集。你可以自由安排时间——休息恢复精力、找人聊天社交、探索废墟、或者做任何你觉得有意义的事。';
+        } else if (tension < 0.1) {
+            brief = `📊【当前态势】物资正常（木柴够${Math.round(woodH)}小时，食物够${foodM}餐，电力够${Math.round(powerH)}小时）。`;
+            if (heatingOk) brief += '供暖稳定。';
+            brief += '\n资源储备尚可，但仍需适当补充。你可以根据自己的状态和判断来安排时间。';
+        } else if (tension < 0.3) {
+            brief = `📊【当前态势】物资偏紧（木柴够${Math.round(woodH)}小时，食物够${foodM}餐，电力够${Math.round(powerH)}小时）。`;
+            brief += '\n部分资源储备不太够，需要关注。';
+        } else {
+            brief = `📊【当前态势】物资紧张！（木柴够${Math.round(woodH)}小时，食物够${foodM}餐，电力够${Math.round(powerH)}小时）。`;
+            if (this.hasAnyCrisis()) {
+                if (this.crisisFlags.noFood) brief += '⚠️食物即将耗尽！';
+                if (this.crisisFlags.noPower) brief += '⚠️电力即将耗尽！';
+                if (this.crisisFlags.noWoodFuel) brief += '⚠️木柴即将耗尽！';
+            }
+        }
+        
+        // 附加全镇人员状态概要
+        const aliveCount = this.game.npcs.filter(n => !n.isDead).length;
+        const totalCount = this.game.npcs.length;
+        const lowSanCount = this.game.npcs.filter(n => !n.isDead && n.sanity < 40).length;
+        const sickCount = this.game.npcs.filter(n => !n.isDead && n.isSick).length;
+        
+        if (lowSanCount > 0 || sickCount > 0) {
+            brief += `\n👥 全镇${aliveCount}/${totalCount}人存活`;
+            if (lowSanCount > 0) brief += `，${lowSanCount}人精神状态不佳`;
+            if (sickCount > 0) brief += `，${sickCount}人生病`;
+            brief += '。';
+        }
+        
+        return brief;
     }
 
     /** 【v4.1】获取存活人口缩减系数（人少了消耗降低，最低30%） */
@@ -1232,9 +1289,11 @@ class ResourceSystem {
                 break;
         }
 
-        // AI模式日志
+        // AI模式日志（包含具体数值，方便复盘）
         if (this.game.aiModeLogger) {
-            this.game.aiModeLogger.log('EXPLORE', `${npc.name} 探索废墟: ${result.name} (今日${this.ruinsExploresToday}/${RUINS_MAX_EXPLORES_PER_DAY})`);
+            const typeNames = { food: '食物', woodFuel: '木柴', power: '电力', medkit: '急救包', sanBoost: 'San值', nothing: '无' };
+            const amountStr = result.amount > 0 ? ` → ${typeNames[result.type] || result.type}+${result.amount}` : '';
+            this.game.aiModeLogger.log('EXPLORE', `${npc.name} 探索废墟: ${result.name}${amountStr} (今日${this.ruinsExploresToday}/${RUINS_MAX_EXPLORES_PER_DAY}, 剩余${remaining}次)`);
         }
 
         console.log(`[ResourceSystem-废墟] ${npc.name} 探索结果: ${result.name}, 今日${this.ruinsExploresToday}/${RUINS_MAX_EXPLORES_PER_DAY}`);

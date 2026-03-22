@@ -869,12 +869,9 @@
 
         // 6-4: 多条件叠加——饱腹=0 + 体力=0 = 双重惩罚，上面的三个条件是独立计算的
 
-        // 6-5: 健康自然恢复——仅在暖炉旁 + 饱腹>0 时以低速率恢复
-        const isNearFurnace = (
-            this.currentScene !== 'village' || // 室内默认有暖炉覆盖
-            (game.furnaceSystem && game.furnaceSystem._isInAnyFurnaceRange && game.furnaceSystem._isInAnyFurnaceRange(this))
-        );
-        if (isNearFurnace && this.hunger > 0 && this.health < 100 && !this.isSick) {
+        // 6-5: 健康自然恢复——仅在室内 + 饱腹>0 时以低速率恢复
+        const isInIndoor = this.currentScene !== 'village'; // 室内场景均有集中供暖覆盖
+        if (isInIndoor && this.hunger > 0 && this.health < 100 && !this.isSick) {
             this.health = Math.min(100, this.health + 0.01 * dt);
         }
 
@@ -947,9 +944,12 @@
             this.sanity = Math.min(100, this.sanity + 0.12 * dt);
             sanSources.push(`社交+${(0.12 * dt).toFixed(2)}`);
         }
+        // 是否处于休息缓冲期
+        const isRestingAtHome = this._restCooldownTimer > 0;
+
         // 【增强】San值低时额外加速下降（恶性循环：精神越差越难自控）
         // 【修复】添加保底机制：物资充足时恶性循环速率减半，San不会因纯粹的心理因素快速致死
-        if (this.sanity < 30 && this.sanity > 0) {
+        if (this.sanity < 30 && this.sanity > 0 && !isRestingAtHome) {
             // 物资充足判定：食物>30且非饥饿状态，给予减缓
             const resourceOk = this.hunger > 30 && this.health > 30;
             const spiralMult = resourceOk ? 0.5 : 1.0; // 物资充足时恶性循环减半
@@ -989,40 +989,20 @@
             this.sanity = Math.max(0, this.sanity - 0.04 * sanDropMult * dt);
             sanSources.push(`饥饿-${(0.04 * sanDropMult * dt).toFixed(2)}`);
         }
-        // ---- 看歆玥演出恢复San值（少量花钱）----
-        // 必须NPC有主动观看标记（通过行动决策去的）或状态覆盖为entertainment
-        // 歆玥演出时间：14:00-16:00广场、19:00-21:00酒馆驻唱
+        // ---- 歆玥鼓舞效果（基于morale_inspire专长）----
+        // 【修复v4.15】移除写死的"演出时间/场所"逻辑。歆玥的角色是侦察员/急救兵，
+        // 她的morale_inspire专长让她在同场景时自然带来精神恢复，不需要写死的"14:00广场演出"
         const linYue = game.npcs.find(n => n.id === 'ling_yue');
-        const linYuePerforming = linYue && (
-            (linYue.currentScene === 'village' && hour >= 14 && hour < 16) ||  // 广场演出
-            (linYue.currentScene === 'kitchen' && hour >= 19 && hour < 21)     // 炊事房驻唱
-        );
-        // 只有主动去看演出（通过_stateOverride=entertainment 或 行动决策到达同场景）才恢复San值
-        const isActivelyWatching = this.id !== 'ling_yue' && linYuePerforming && linYue.currentScene === this.currentScene
-            && (this._stateOverride === 'entertainment' || this._actionOverride === 'watch_show' || this.stateDesc?.includes('演出') || this.stateDesc?.includes('看戏'));
-        if (isActivelyWatching) {
-            this.isWatchingShow = true;
-            this.sanity = Math.min(100, this.sanity + 0.20 * dt);  // 看演出大幅恢复San值
-            sanSources.push(`看演出+${(0.20 * dt).toFixed(2)}`);
-            // 歆玥获得演出收入（v2.2已移除存款系统）
-            if (linYue) {
-                // 【目标追踪】标记歆玥正在演出（每场演出只计一次）
-                if (!linYue._performanceTrackedThisSlot) {
-                    linYue._performanceTrackedThisSlot = true;
-                    if (linYue.trackPerformance) linYue.trackPerformance();
-                }
-            }
+        const linYueAlive = linYue && !linYue.isDead && !linYue.isSleeping;
+        const linYueSameScene = linYueAlive && linYue.currentScene === this.currentScene && this.id !== 'ling_yue';
+        if (linYueSameScene) {
+            // 与歆玥同场景时，获得微量San恢复（氛围加成，基于morale_inspire专长1.3倍）
+            const inspireRate = 0.03 * (linYue.config?.specialties?.morale_inspire || 1.0);
+            this.sanity = Math.min(100, this.sanity + inspireRate * dt);
+            sanSources.push(`歆玥鼓舞+${(inspireRate * dt).toFixed(2)}`);
+            this.isWatchingShow = true; // 复用现有状态标记
         } else {
             this.isWatchingShow = false;
-            // 【目标追踪】非演出/不在看→重置演出追踪标志，让下一场可以再计次
-            if (linYue && !linYuePerforming) {
-                linYue._performanceTrackedThisSlot = false;
-            }
-            // 非主动观看但碰巧在同场景，给微量恢复（氛围加成）
-            if (this.id !== 'ling_yue' && linYuePerforming && linYue.currentScene === this.currentScene) {
-                this.sanity = Math.min(100, this.sanity + 0.03 * dt);
-                sanSources.push(`演出氛围+${(0.03 * dt).toFixed(2)}`);
-            }
         }
 
         // ---- 找苏医生心理咨询恢复San值（大量花钱）----
@@ -1045,15 +1025,20 @@
         }
 
         // 清醒时San值自然缓慢下降（需要持续获取情绪价值/休息）
-        // 【修复】物资充足时保底San=5，避免纯心理因素快速致死
-        const naturalDecay = 0.02 * sanDropMult * dt;
-        const _resourceSufficient = this.hunger > 30 && this.health > 30 && this.stamina > 15;
-        if (_resourceSufficient && this.sanity - naturalDecay < 5) {
-            this.sanity = Math.max(5, this.sanity);
+        // 【修复v4.7】物资充足时保底San=5，避免纯心理因素快速致死
+        // 【修复v4.7】白天休息缓冲期中不再扣自然衰减（否则休息时也在掉San，休息无法有效恢复精神）
+        if (!isRestingAtHome) {
+            const naturalDecay = 0.02 * sanDropMult * dt;
+            const _resourceSufficient = this.hunger > 30 && this.health > 30 && this.stamina > 15;
+            if (_resourceSufficient && this.sanity - naturalDecay < 5) {
+                this.sanity = Math.max(5, this.sanity);
+            } else {
+                this.sanity = Math.max(0, this.sanity - naturalDecay);
+            }
+            sanSources.push(`自然衰减-${naturalDecay.toFixed(2)}`);
         } else {
-            this.sanity = Math.max(0, this.sanity - naturalDecay);
+            sanSources.push(`休息中(跳过自然衰减)`);
         }
-        sanSources.push(`自然-${naturalDecay.toFixed(2)}`);
 
         // 【Debug】周期性记录San值变化（每60帧约2秒记录一次，避免刷屏）
         if (game.mode === 'debug') {
@@ -1443,8 +1428,8 @@
                 // 强制NPC回到据点
                 this._stateOverride = 'force_return';
                 this._actionOverride = 'go_to';
-                this._actionTarget = 'furnace_main';
-                this._currentAction = { type: 'go_to', target: 'furnace_main', reason: '户外工作超时，必须回室内取暖' };
+                this._actionTarget = 'dorm_a_door';
+                this._currentAction = { type: 'go_to', target: 'dorm_a_door', reason: '户外工作超时，必须回室内取暖' };
                 if (game.addEvent) {
                     game.addEvent(`⚠️ ${this.name}在户外工作超过2小时，体温下降严重，强制返回室内取暖！`);
                 }
@@ -1519,21 +1504,22 @@
             this._outdoorContinuousTime += dt;
         }
 
-        // ---- 室内暖炉旁：体温恢复 ----
+        // ---- 室内：体温恢复/降温 ----
         if (!isOutdoor) {
             const fs = game.furnaceSystem;
             const isNearFurnace = fs && fs.isNearActiveFurnace(this);
+            // 【修复v4.16】使用室内温度而非室外温度来计算室内降温
+            const indoorTemp = (fs && fs.indoorTemp !== undefined) ? fs.indoorTemp : temp;
 
             if (isNearFurnace) {
-                // 暖炉旁恢复体温: +0.2°C/分钟 = +0.00333/秒
+                // 供暖有效：恢复体温（FurnaceSystem._applyIndoorWarmthEffects也会恢复，此处是额外的暖炉旁加成）
                 this.bodyTemp = Math.min(36.5, this.bodyTemp + 0.00333 * dt);
-                // 暖炉旁体力和健康微恢复（由FurnaceSystem处理）
-            } else if (temp < 0) {
-                // 室内但暖炉未运行/不在范围内，缓慢降温【已调整：从0.00005降为0.00003】
-                const indoorDropRate = Math.abs(temp) * 0.00003 * dt;
+            } else if (indoorTemp < 0) {
+                // 室内但供暖失效且室内温度<0，缓慢降温（使用室内温度计算，不是室外-60°C）
+                const indoorDropRate = Math.abs(indoorTemp) * 0.00003 * dt;
                 this.bodyTemp = Math.max(25, this.bodyTemp - indoorDropRate);
             } else {
-                // 室内且温度≥0，缓慢恢复体温
+                // 室内且室内温度≥0（供暖基本有效或天气不冷），缓慢恢复体温
                 this.bodyTemp = Math.min(36.5, this.bodyTemp + 0.001 * dt);
             }
 
@@ -1551,9 +1537,11 @@
             this.isHypothermic = true;
             this._rescueNeeded = true;
 
-            // 严重失温持续伤害【已调整：加快严重失温伤害】
-            this.health = Math.max(0, this.health - 0.2 * dt);
-            this.stamina = Math.max(0, this.stamina - 0.3 * dt);
+            // 严重失温持续伤害
+            // 【修复v4.16】室内严重失温伤害减半（已在室内取暖中）
+            const severeIndoorMult = isOutdoor ? 1.0 : 0.5;
+            this.health = Math.max(0, this.health - 0.2 * dt * severeIndoorMult);
+            this.stamina = Math.max(0, this.stamina - 0.3 * dt * severeIndoorMult);
 
             // 救援倒计时（户外30分钟=1800游戏秒，室内60分钟=3600游戏秒）
             if (isOutdoor) {
@@ -1597,9 +1585,11 @@
                 this._hypothermiaDuration = Math.max(0, this._hypothermiaDuration - dt * 0.5); // 缓慢恢复
             }
 
-            // 失温持续伤害（较轻）【已调整：加快失温伤害】
-            this.health = Math.max(0, this.health - 0.05 * dt);
-            this.stamina = Math.max(0, this.stamina - 0.08 * dt);
+            // 失温持续伤害
+            // 【修复v4.16】区分室内室外：室内已在取暖恢复中，伤害应大幅减轻
+            const hypoIndoorMult = isOutdoor ? 1.0 : 0.3;
+            this.health = Math.max(0, this.health - 0.05 * dt * hypoIndoorMult);
+            this.stamina = Math.max(0, this.stamina - 0.08 * dt * hypoIndoorMult);
 
             if (!wasHypothermic) {
                 this.mood = '发抖';
@@ -2009,7 +1999,9 @@
         // 优先级顺序：体力极低 > 生病 > 饥饿 > 精神差
         // 【修复】如果NPC正在睡觉且饱腹<10，跳过体力仲裁，直接走饥饿路径
         // 优先级1：体力极低 → 回家睡觉（可打断饥饿）
-        if (this.stamina < 15 && !isLateNight && !this.isSleeping) {
+        // 【v4.17修复】NPC已在非village的室内场景时，不触发exhausted外出回宿舍（避免弹弹乐循环）
+        const isInIndoorScene = this.currentScene && this.currentScene !== 'village';
+        if (this.stamina < 15 && !isLateNight && !this.isSleeping && !isInIndoorScene) {
             if (this._hungerOverride) {
                 // 【行为锁保护】如果正在吃饭(isEating=true)，检查距离——快到了/正在吃就不打断
                 if (this.isEating) {
@@ -2045,7 +2037,8 @@
 
         // 优先级2：生病或健康低 → 去医院看病（可打断饥饿）
         // 【增强】提高触发阈值：健康<35就触发（原来<25）
-        if ((this.isSick || this.health < 35) && !isLateNight) {
+        // 【v4.17修复】NPC已在medical场景时不触发（已经在医院了，直接等治疗即可，避免弹弹乐循环）
+        if ((this.isSick || this.health < 35) && !isLateNight && this.currentScene !== 'medical') {
             if (this._hungerOverride) {
                 // 【行为锁保护】正在吃饭时，不打断（除非健康<10致命紧急）
                 if (this.isEating && this.health >= 10) {
@@ -2071,7 +2064,8 @@
         // 优先级4：精神状态差 → 去医院找苏医生咨询（非发疯状态下的预防行为）
         // 【增强】提高触发阈值：San<35就触发（原来<25）让NPC更早开始关注精神健康
         // 【v4.1修复】苏岩自己不触发去找自己咨询的行为
-        if (this.sanity < 35 && !this.isCrazy && !isLateNight && this.id !== 'su_doctor') {
+        // 【v4.17修复】NPC已在medical场景时不触发（已经在医院了，避免弹弹乐循环）
+        if (this.sanity < 35 && !this.isCrazy && !isLateNight && this.id !== 'su_doctor' && this.currentScene !== 'medical') {
             this._triggerStateOverride('mental', game);
             return;
         }

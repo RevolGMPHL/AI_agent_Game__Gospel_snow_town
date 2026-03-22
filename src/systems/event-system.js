@@ -8,14 +8,13 @@
 
 /**
  * 事件系统 - 条件触发的随机事件与冲突机制
- * 管理食物冲突、暖炉争抢、暴力事件、悲痛恐慌等
+ * 管理食物冲突、暴力事件、悲痛恐慌等
  * 依赖: game.js, npc.js, resource-system.js, furnace-system.js, weather-system.js, death-system.js
  */
 
 // ============ 事件类型 ============
 const EVENT_TYPES = {
     FOOD_CONFLICT:     'FOOD_CONFLICT',     // 食物分配冲突
-    FURNACE_SCRAMBLE:  'FURNACE_SCRAMBLE',  // 暖炉争抢
     VIOLENCE:          'VIOLENCE',           // 暴力事件
     GRIEF:             'GRIEF',              // 悲痛事件
     PANIC:             'PANIC',              // 恐慌事件
@@ -82,9 +81,6 @@ class EventSystem {
 
         // ---- 食物分配冲突 ----
         this._checkFoodConflict(rs, aliveNpcs);
-
-        // ---- 暖炉争抢（第4天仅1座暖炉） ----
-        this._checkFurnaceScramble(ws, fs, aliveNpcs);
 
         // ---- 暴力事件（San<10） ----
         // 已在npc.js中实现，这里做额外检测和记录
@@ -238,7 +234,7 @@ class EventSystem {
         }
     }
 
-    /** 歆玥自动鼓舞士气：当多人San<30时 */
+    /** 歆玥自动鼓舞士气：当多人San<30时（基于morale_inspire专长） */
     _checkMoraleBoost(aliveNpcs) {
         if (this._moraleCooldown > 0) return;
 
@@ -248,7 +244,7 @@ class EventSystem {
         const lowSanCount = aliveNpcs.filter(n => n.sanity < 30).length;
         if (lowSanCount < 3) return;
 
-        // 歆玥自动触发演出鼓舞
+        // 歆玥自动触发鼓舞
         this._moraleCooldown = 7200; // 2小时冷却
 
         // 同场景所有NPC恢复San
@@ -256,9 +252,9 @@ class EventSystem {
         for (const npc of sameScene) {
             npc.sanity = Math.min(100, npc.sanity + 10);
         }
-        lingYue.stamina = Math.max(0, lingYue.stamina - 15); // 演出消耗体力
+        lingYue.stamina = Math.max(0, lingYue.stamina - 15); // 鼓舞消耗体力
 
-        const line = `歆玥唱起了歌，温暖了大家的心灵…`;
+        const line = `歆玥鼓励了大家，温暖了所有人的心灵…`;
         this._recordEvent(EVENT_TYPES.MORALE_BOOST, line, sameScene.map(n => n.id));
 
         if (this.game.addEvent) {

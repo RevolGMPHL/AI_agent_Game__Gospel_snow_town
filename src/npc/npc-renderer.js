@@ -200,11 +200,11 @@ this.currentPath = GST.findPath(pos.x, pos.y, tx, ty, map) || [];
         else if (this.health < 50) attrHints.push('你感觉身体不太舒服，有点亚健康，最好注意休息和饮食');
         if (this.isSick) attrHints.push('⚠️ 你正在生病，非常不舒服，必须去医院看病！拖着不去只会越来越严重！');
         // San值提示——【增强】更强烈的焦虑感和紧迫感
-        if (this.isCrazy) attrHints.push('🤯 你正在发疯！精神完全崩溃，无法正常思考，急需去找苏医生做心理咨询或者好好睡一觉');
-        else if (this.sanity < 15) attrHints.push('🚨🚨 你快疯了！！脑子里全是噪音，你控制不住自己的情绪，随时可能崩溃！你现在什么都做不了，必须立刻、马上去找苏医生（医院）做心理咨询！！这是最紧急的事！');
-        else if (this.sanity < 25) attrHints.push('🚨 你精神状态非常差！你感到极度焦虑、恐惧、绝望，脑子像被什么东西紧紧箍住。你的工作效率大幅下降，和人说话也容易失态。必须尽快去医院找苏医生做心理咨询，或者去看歆玥的演出缓解一下！再这样下去你就要崩溃了！');
-        else if (this.sanity < 35) attrHints.push('⚠️ 你精神状态很差，经常感到莫名的焦虑和烦躁，做事难以集中注意力。你觉得自己快要撑不住了。应该去找苏医生聊聊（医院），或者看看歆玥的演出放松一下，或者好好睡一觉。');
-        else if (this.sanity < 50) attrHints.push('你精神状态一般，有些疲惫和低落。可以找人聊聊天、看看歆玥的演出、或者休息一下');
+        if (this.isCrazy) attrHints.push('🤯 你正在发疯！精神完全崩溃，无法正常思考，你需要想办法恢复精神状态');
+        else if (this.sanity < 15) attrHints.push('🚨🚨 你快疯了！！脑子里全是噪音，你控制不住自己的情绪，随时可能崩溃！你现在什么都做不了，必须立刻想办法恢复精神状态！');
+        else if (this.sanity < 25) attrHints.push('🚨 你精神状态非常差！你感到极度焦虑、恐惧、绝望，脑子像被什么东西紧紧箍住。你的工作效率大幅下降，和人说话也容易失态。再这样下去你就要崩溃了！');
+        else if (this.sanity < 35) attrHints.push('⚠️ 你精神状态很差，经常感到莫名的焦虑和烦躁，做事难以集中注意力。你觉得自己快要撑不住了。');
+        else if (this.sanity < 50) attrHints.push('你精神状态一般，有些疲惫和低落');
         else if (this.sanity >= 80) attrHints.push('你精神状态很好，头脑清晰，充满干劲');
         // 【增强】多重负面状态叠加时的紧急警告
         const criticalCount = [this.sanity < 30, this.health < 35, this.stamina < 20, this.hunger < 25].filter(Boolean).length;
@@ -225,13 +225,14 @@ ${game.resourceSystem && game.resourceSystem.getUrgencyPrompt ? game.resourceSys
 ${game.resourceSystem && game.resourceSystem.getResourceForecastForPrompt ? game.resourceSystem.getResourceForecastForPrompt() : ''}
 ${game.resourceSystem && game.resourceSystem.getSupplyRecommendationPrompt ? game.resourceSystem.getSupplyRecommendationPrompt() : ''}
 ${game.weatherSystem && (game.weatherSystem.currentDay === 1 || game.weatherSystem.currentDay === 3) ? '\n⏰ 现在是补给窗口期，建议全力采集物资！' : ''}
-${game.resourceSystem ? `资源紧张度: ${game.resourceSystem.getResourceTension().toFixed(2)}/1.0${game.resourceSystem.getResourceTension() >= 0.3 ? '（紧张！减少社交，优先工作）' : game.resourceSystem.getResourceTension() >= 0.1 ? '（偏紧，注意资源）' : '（正常）'}` : ''}
+${game.resourceSystem ? `资源紧张度: ${game.resourceSystem.getResourceTension().toFixed(2)}/1.0${game.resourceSystem.getResourceTension() >= 0.3 ? '（紧张！减少社交，优先工作）' : game.resourceSystem.getResourceTension() >= 0.1 ? '（偏紧，注意资源）' : '（正常，物资充足）'}` : ''}
+${game.resourceSystem && game.resourceSystem.getResourceSituationBrief ? game.resourceSystem.getResourceSituationBrief() : ''}
 ${game.furnaceSystem ? `暖炉状况: ${game.furnaceSystem.getFurnaceSummary()}` : ''}
 ${game.taskSystem ? `任务进度: ${game.taskSystem.getTaskSummaryForPrompt()}` : ''}
 ${game.taskSystem ? `你的任务: ${game.taskSystem.getNpcTaskDescForPrompt(this.id)}` : ''}
 ${game.deathSystem && game.deathSystem.getDeathSummaryForPrompt() ? `死亡情况: ${game.deathSystem.getDeathSummaryForPrompt()}` : ''}
 ${game.deathSystem && game.deathSystem.isNpcGrieving(this.id) ? '⚠️ 你正处于悲痛状态，因为有同伴刚刚死去。' : ''}
-${this.bodyTemp < 35 ? `🚨 你正在失温！体温: ${this.bodyTemp.toFixed(1)}°C，必须立即回暖炉旁！` : ''}
+${this.bodyTemp < 35 ? `🚨 你正在失温！体温: ${this.bodyTemp.toFixed(1)}°C，必须立即回室内取暖！` : ''}
 ${this.isHypothermic ? '🥶 你浑身发抖，行动迟缓，思维模糊...' : ''}
 ${game.reincarnationSystem && game.reincarnationSystem.getLifeNumber() > 1 ? game.reincarnationSystem.getPastLifeHintForThinking(game.mode === 'reincarnation') : ''}
 ${game.reincarnationSystem ? game.reincarnationSystem.getWorkPlanSummaryForNpc(this.id) : ''}
@@ -241,13 +242,13 @@ ${game.reincarnationSystem ? (() => { const lessons = game.reincarnationSystem.g
 1. 这是一个末日生存环境。你的首要目标是活下去，其次是帮助同伴活下去。
 2. 你的情绪和言行必须和当前生存环境一致。如果资源紧缺，你应该焦虑；如果有人死了，你应该悲痛或恐惧。
 3. expression是你真正说出口的话，应该围绕生存话题（"还有多少食物？""暖炉够不够？""今天的任务完成了吗？"）。
-4. 🎯【最高优先】你必须严格执行工作安排表中的分工（见上方安排表中★标记的任务）。安排表是全镇指挥中心基于前世教训制定的最优方案，这是你的核心职责！你的思考应该围绕如何高效完成分配给你的任务。
+4. 上方有工作安排表供你参考。当资源紧张时你应该积极执行安排的任务，但当物资充足时你完全可以自主决定做什么——休息、社交、探索，一切由你自己判断。
 5. 你的思考和行为应该受到你当前身心状态和生存压力的影响。
 6. 如果温度极低（<-20°C），你在户外会非常痛苦和恐惧。
 7. 如果你看到有人倒下或状态很差，你应该去帮助他们。
 ${game.reincarnationSystem && game.reincarnationSystem.getLifeNumber() > 1 ? '8. 🔮【轮回记忆·参考情报】上方有前世记忆信息作为背景参考。你可以根据自己的判断决定是否在thought或expression中提及前世经验。前世记忆是你的情报来源之一，但你的决策应基于当前的实际状况。不要每句话都提前世，只在你觉得确实相关时自然地引用。' : '8. 这是第一世，你没有任何前世记忆。不要提及"上一世""前世"等概念，专注于当前的末日生存处境。'}
 ${game.weatherSystem && !game.weatherSystem.canGoOutside() ? '🚨 今天严禁外出！-60°C！在户外会迅速冻死！' : ''}
-${game.weatherSystem && game.weatherSystem.getEffectiveTemp() < -20 ? '🚨🚨 户外极度危险！温度' + game.weatherSystem.getEffectiveTemp() + '°C！尽量待在暖炉旁！' : ''}
+${game.weatherSystem && game.weatherSystem.getEffectiveTemp() < -20 ? '🚨🚨 户外极度危险！温度' + game.weatherSystem.getEffectiveTemp() + '°C！尽量待在室内！' : ''}
 ${this.id === 'old_qian' ? `你是退休镇长/精神领袖，在末日中承担起安抚情绪、调解冲突的重任。你的领导力和人生阅历是团队的精神支柱。清璇是你的孙女，你格外牵挂她。` : ''}
 ${this.id === 'qing_xuan' ? `你是16岁的药剂师学徒，老钱的孙女。负责制作草药制剂和急救包、协助医疗救治。你聪明好学、心灵手巧，在危机中逐渐展现超越年龄的能力。你暗恋陆辰。` : ''}
 ${this.id === 'wang_teacher' ? `你是技师/规划师，末日前是哲学教师，现在负责维修发电机、设计暖炉扩建方案、统筹全队效率。你暗恋歆玥，理性冷静但有时过于冷酷。` : ''}

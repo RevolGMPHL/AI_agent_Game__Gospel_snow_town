@@ -1073,6 +1073,8 @@ this.affinity = { qing_xuan: 72 };
             this._restCooldownTimer -= _realDt;
             // 【硬保护B4】缓冲期内渐进恢复体力（按游戏时间恢复，保证高倍速恢复效率同步提升）
             this.stamina = Math.min(100, this.stamina + 2 * dt);
+            // 【v4.7修复】白天休息也恢复San值（之前只有isSleeping=true才恢复，白天rest完全不回San）
+            this.sanity = Math.min(100, this.sanity + 0.06 * dt);
             // 【边界保护】极度饥饿(hunger<10)可以穿透休息缓冲期
             if (this.hunger < 10) {
                 console.log(`[饥饿穿透] ${this.name} 休息缓冲期中极度饥饿(${Math.round(this.hunger)})，穿透缓冲期去吃饭`);
@@ -1113,12 +1115,12 @@ this.affinity = { qing_xuan: 72 };
             }
         }
 
-        // 【老钱被动光环】镇长讲话 - 当老钱在暖炉广场且同场景存活NPC≥3人时，自动为在场NPC恢复San值
+        // 【老钱被动光环】镇长讲话 - 当老钱在室内且同场景存活NPC≥3人时，自动为在场NPC恢复San值
         if (this.id === 'old_qian' && !this.isDead && game && game.npcs) {
-            // 判断老钱是否在暖炉广场（village场景的furnace_plaza区域，或直接用currentScene判断）
-            const isAtFurnacePlaza = this.currentScene === 'village' && 
-                this.x >= 20 * GST.TILE && this.x <= 30 * GST.TILE && this.y >= 18 * GST.TILE && this.y <= 26 * GST.TILE;
-            if (isAtFurnacePlaza) {
+            // 【修复v4.16】老钱光环改为室内触发（暖炉广场是露天的，不合理）
+            const fs = game.furnaceSystem;
+            const isIndoor = fs && fs.isIndoorScene(this.currentScene);
+            if (isIndoor) {
                 const sameSceneAlive = game.npcs.filter(n => 
                     n.id !== this.id && !n.isDead && n.currentScene === this.currentScene
                 );
@@ -1687,6 +1689,13 @@ this.affinity = { qing_xuan: 72 };
 
     _enterIndoor(targetScene, game) {
         game = game || this.game;
+        // 【v4.18防抖】如果NPC已在目标场景中，不执行重复进门（避免弹弹乐日志刷屏）
+        if (this.currentScene === targetScene) {
+            this._pendingEnterScene = null;
+            this._pendingEnterKey = null;
+            this.scheduleReached = true;
+            return true;
+        }
         // 【v4.5诊断】记录进门原因到aiModeLogger
         const _stack = new Error().stack;
         const _callerLine = _stack.split('\n').slice(2,4).map(s => s.trim().replace(/^at /, '')).join(' ← ');

@@ -22,7 +22,6 @@ const TASK_TYPES = {
     PREPARE_MEDICAL:  'PREPARE_MEDICAL',   // 准备医疗物资
     BOOST_MORALE:     'BOOST_MORALE',      // 鼓舞士气
     COORDINATE:       'COORDINATE',        // 统筹协调
-    BUILD_FURNACE:    'BUILD_FURNACE',     // 修建暖炉
     DISTRIBUTE_FOOD:  'DISTRIBUTE_FOOD',   // 分配食物
     MAINTAIN_ORDER:   'MAINTAIN_ORDER',    // 维持秩序
     REST_RECOVER:     'REST_RECOVER',      // 休息恢复
@@ -99,32 +98,22 @@ const TASK_DETAILS = {
     },
     [TASK_TYPES.BOOST_MORALE]: {
         name: '🎵 鼓舞士气',
-        desc: '在暖炉广场通过唱歌、鼓励来提振全员士气',
+        desc: '在宿舍或公共室内区域通过唱歌、鼓励来提振全员士气',
         isOutdoor: false,
         baseYield: 0,
         baseDuration: 1800,
         staminaCost: 8,
-        targetLocation: 'furnace_plaza',
+        targetLocation: 'dorm_a_door',
         resourceType: null,
     },
     [TASK_TYPES.COORDINATE]: {
         name: '📢 统筹协调',
-        desc: '在暖炉广场安抚居民情绪、监督任务进度、制定计划',
+        desc: '在宿舍或公共室内区域安抚居民情绪、监督任务进度、制定计划',
         isOutdoor: false,
         baseYield: 0,
         baseDuration: 3600,
         staminaCost: 5,
-        targetLocation: 'furnace_plaza',
-        resourceType: null,
-    },
-    [TASK_TYPES.BUILD_FURNACE]: {
-        name: '🏗️ 修建第二暖炉',
-        desc: '在工坊修建第二座暖炉，需多人协作',
-        isOutdoor: false,
-        baseYield: 0,
-        baseDuration: 7200,
-        staminaCost: 25,
-        targetLocation: 'workshop_door',
+        targetLocation: 'dorm_a_door',
         resourceType: null,
     },
     // MAINTAIN_FURNACE已移除（v4.6: 暖炉自动燃烧消耗木柴，无需人工维护）
@@ -140,22 +129,22 @@ const TASK_DETAILS = {
     },
     [TASK_TYPES.MAINTAIN_ORDER]: {
         name: '🛡️ 维持秩序',
-        desc: '在暖炉广场安抚情绪、调解冲突、维持团队秩序',
+        desc: '在宿舍和公共室内区域安抚情绪、调解冲突、维持团队秩序',
         isOutdoor: false,
         baseYield: 0,
         baseDuration: 3600,
         staminaCost: 5,
-        targetLocation: 'furnace_plaza',
+        targetLocation: 'dorm_a_door',
         resourceType: null,
     },
     [TASK_TYPES.REST_RECOVER]: {
         name: '🛏️ 休息恢复',
-        desc: '在暖炉旁休息恢复体力和健康',
+        desc: '在室内休息恢复体力和健康',
         isOutdoor: false,
         baseYield: 0,
         baseDuration: 3600,
         staminaCost: 0,
-        targetLocation: 'furnace_plaza',
+        targetLocation: 'dorm_a_door',
         resourceType: null,
     },
     // ---- 新增特殊任务 ----
@@ -202,7 +191,6 @@ const NPC_SPECIALTIES = {
         bonuses: {
             [TASK_TYPES.COLLECT_WOOD]: 1.5,
             [TASK_TYPES.COLLECT_MATERIAL]: 1.3,
-            [TASK_TYPES.BUILD_FURNACE]: 1.3,
             [TASK_TYPES.BUILD_GENERATOR]: 1.3,
             [TASK_TYPES.BUILD_LUMBER_MILL]: 1.3,
             [TASK_TYPES.COLLECT_FOOD]: 1.3,
@@ -214,7 +202,6 @@ const NPC_SPECIALTIES = {
         bonuses: {
             [TASK_TYPES.COLLECT_MATERIAL]: 1.5,
             [TASK_TYPES.COLLECT_FOOD]: 1.3,
-            [TASK_TYPES.BUILD_FURNACE]: 1.3,
             [TASK_TYPES.BUILD_GENERATOR]: 1.2,
             [TASK_TYPES.BUILD_LUMBER_MILL]: 1.2,
             [TASK_TYPES.COLLECT_WOOD]: 1.3,
@@ -236,7 +223,6 @@ const NPC_SPECIALTIES = {
         desc: '发电机维修×2、暖炉扩建×1.5、机器建造×1.5、全队规划+10%',
         bonuses: {
             [TASK_TYPES.MAINTAIN_POWER]: 2.0,
-            [TASK_TYPES.BUILD_FURNACE]: 1.5,
             [TASK_TYPES.BUILD_GENERATOR]: 1.5,
             [TASK_TYPES.BUILD_LUMBER_MILL]: 1.5,
             [TASK_TYPES.COORDINATE]: 1.5,
@@ -549,12 +535,11 @@ class TaskSystem {
         this._addTask(TASK_TYPES.PREPARE_MEDICAL, 1, 'high', 'qing_xuan');
     }
 
-    /** 第3天（0°C喘息日）任务 — 重点修建第二暖炉 */
+    /** 第3天（0°C喘息日）任务 — 重点加固集中供暖保障 */
     _generateDay3Tasks(rs, fs, npcs) {
         // 【v2.0-需求10】第3天是为第4天做准备的关键日
         // 计算第4天所需物资（-60°C暴风雪，消耗×2.0）
-        const furnaceCount = this.game.furnaceSystem ? this.game.furnaceSystem.furnaces.length : 1;
-        const day4WoodNeeded = Math.round(2.5 * furnaceCount * 24 * 2.0); // 2.5/h × 暖炉数 × 24h × 2.0倍
+        const day4WoodNeeded = Math.round(2.5 * 24 * 2.0); // 集中供暖木材需求
         const day4FoodNeeded = Math.round(npcs.length * 1.5 * 2); // 人数×1.5×2餐
         const day4PowerNeeded = Math.round(3 * 24 * 1.5); // 3/h × 24h × 1.5倍
 
@@ -570,12 +555,8 @@ class TaskSystem {
             this.game.addEvent(`  ⚡ 电力: 需${day4PowerNeeded}单位，当前${Math.round(rs ? rs.power : 0)}${powerDeficit > 0 ? `（缺${powerDeficit}❌）` : '✅'}`);
         }
 
-        // 重点：修建第二暖炉 — 赵铁柱+陆辰+王策
-        if (fs && !fs.secondFurnaceBuilt && !fs.isBuildingSecondFurnace) {
-            this._addTask(TASK_TYPES.BUILD_FURNACE, 1, 'urgent', 'zhao_chef');
-            this._addTask(TASK_TYPES.BUILD_FURNACE, 1, 'urgent', 'lu_chen');
-            this._addTask(TASK_TYPES.BUILD_FURNACE, 1, 'urgent', 'wang_teacher');
-        }
+        // 第3天重点：补足木材和电力，确保第4天集中供暖强度足够
+        this._addTask(TASK_TYPES.PREPARE_WARMTH, 1, 'high', 'li_shen');
 
         // 补充木柴 — 缺口越大优先级越高
         if (woodDeficit > 0) {
@@ -1144,24 +1125,7 @@ class TaskSystem {
                 }
                 break;
             }
-            case TASK_TYPES.BUILD_FURNACE: {
-                // 修建暖炉：通知FurnaceSystem
-                const fs = this.game.furnaceSystem;
-                if (fs && !fs.secondFurnaceBuilt) {
-                    // 收集所有被分配到BUILD_FURNACE的NPC
-                    const builders = this.dailyTasks
-                        .filter(t => t.type === TASK_TYPES.BUILD_FURNACE && t.assignedNpcId)
-                        .map(t => t.assignedNpcId);
-                    if (!fs.isBuildingSecondFurnace) {
-                        // 尚未开始建造，发起建造
-                        fs.startBuildSecondFurnace(builders);
-                    } else {
-                        // 已在建造中，持续同步工人列表（NPC可能中途加入/退出）
-                        fs.buildWorkers = builders;
-                    }
-                }
-                break;
-            }
+
             // MAINTAIN_FURNACE已移除（v4.6）
             case TASK_TYPES.BUILD_GENERATOR:
             case TASK_TYPES.BUILD_LUMBER_MILL: {
@@ -1260,9 +1224,9 @@ class TaskSystem {
                 break;
             }
             case TASK_TYPES.REST_RECOVER: {
-                // 休息恢复：在暖炉旁加速恢复体力和健康
-                const fSys = this.game.furnaceSystem;
-                if (fSys && fSys.isNearActiveFurnace(npc)) {
+                // 休息恢复：在有效室内供暖环境中加速恢复体力和健康
+                const hSys = this.game.furnaceSystem;
+                if (hSys && hSys.isNearActiveFurnace(npc)) {
                     npc.stamina = Math.min(100, npc.stamina + 0.05 * efficiency * dt);
                     npc.health = Math.min(100, npc.health + 0.02 * efficiency * dt);
                 }
@@ -1674,27 +1638,23 @@ class TaskSystem {
             }
         }
 
-        // 2. 第二暖炉未建好：提升优先级
+        // 2. 上一世供暖准备不足：优先增加木材储备
         if (!lastLife.secondFurnaceBuilt) {
-            for (const task of this.dailyTasks) {
-                if (task.type === 'BUILD_FURNACE') {
-                    if (task.priority !== 'urgent') {
-                        task.priority = 'urgent';
-                        console.log(`[TaskSystem-轮回] 暖炉建造任务提升为urgent优先级`);
-                        optimized = true;
-                    }
-                }
-            }
-            // 如果第1天暖炉未建好，增加木柴收集量
-            if (day === 1) {
+            if (day === 1 || day === 3) {
                 for (const task of this.dailyTasks) {
                     if (task.type === 'COLLECT_WOOD') {
                         const oldTarget = task.target;
                         task.target = Math.round(task.target * 1.3);
-                        console.log(`[TaskSystem-轮回] 木柴任务目标提升: ${oldTarget} → ${task.target}（上世暖炉未建好，增加木柴储备）`);
+                        console.log(`[TaskSystem-轮回] 木柴任务目标提升: ${oldTarget} → ${task.target}（上世供暖准备不足，增加木柴储备）`);
                         optimized = true;
-                        break; // 只提升一个
+                        break;
                     }
+                }
+            }
+            for (const task of this.dailyTasks) {
+                if (task.type === 'MAINTAIN_POWER' && task.priority !== 'urgent') {
+                    task.priority = 'urgent';
+                    optimized = true;
                 }
             }
         }
@@ -1968,8 +1928,8 @@ warningNeeds.push({ resourceType: 'power', taskType: TASK_TYPES.MAINTAIN_POWER, 
         if (has('建造伐木机', '自动伐木', '伐木机')) {
             return { type: TASK_TYPES.BUILD_LUMBER_MILL, target: 1, priority: 'high' };
         }
-        if (has('暖炉扩建', '修复暖炉', '扩建暖炉', '建造暖炉', '第二暖炉')) {
-            return { type: TASK_TYPES.BUILD_FURNACE, target: 1, priority: 'urgent' };
+        if (has('供暖', '保暖', '御寒', '加固供暖', '准备过冬')) {
+            return { type: TASK_TYPES.PREPARE_WARMTH, target: 1, priority: 'urgent' };
         }
         if (has('人工发电', '手摇发电', '手动发电', '维护电力', '电力', '接线', '电路', '供电')) {
             return { type: TASK_TYPES.MAINTAIN_POWER, target: calc(TASK_TYPES.MAINTAIN_POWER), priority: 'high' };

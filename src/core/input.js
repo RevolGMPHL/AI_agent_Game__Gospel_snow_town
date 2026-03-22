@@ -115,16 +115,16 @@
             priority: 'high',
         },
         BOOST_MORALE: {
-            targetLocation: 'furnace_plaza',
+            targetLocation: 'dorm_a_door',
             stateDesc: '安抚',
-            reason: '去暖炉广场安抚大家',
+            reason: '去宿舍安抚大家',
             targetValue: 1,
             priority: 'high',
         },
         MAINTAIN_ORDER: {
-            targetLocation: 'furnace_plaza',
+            targetLocation: 'dorm_a_door',
             stateDesc: '巡逻',
-            reason: '去暖炉广场巡逻',
+            reason: '去宿舍巡逻',
             targetValue: 1,
             priority: 'high',
         },
@@ -238,9 +238,9 @@
             action: {
                 mode: 'task_system',
                 taskType: 'BOOST_MORALE',
-                targetLocation: 'furnace_plaza',
+                targetLocation: 'dorm_a_door',
                 stateDesc: '安抚',
-                reason: '去暖炉广场安抚大家',
+                reason: '去宿舍安抚大家',
                 targetValue: 1,
                 priority: 'high'
             }
@@ -250,16 +250,16 @@
             action: {
                 mode: 'task_system',
                 taskType: 'MAINTAIN_ORDER',
-                targetLocation: 'furnace_plaza',
+                targetLocation: 'dorm_a_door',
                 stateDesc: '巡逻',
-                reason: '去暖炉广场巡逻',
+                reason: '去宿舍巡逻',
                 targetValue: 1,
                 priority: 'high'
             }
         },
         { match: text => /仓库|整理物资|盘点|清点库存/.test(text), action: { type: 'go_to', target: 'warehouse_door', reason: '去仓库整理物资' } },
-        { match: text => /待命|原地|别动|守在这/.test(text), action: { type: 'go_to', target: 'furnace_plaza', reason: '去暖炉广场原地待命' } },
-        { match: text => /巡视|逛逛|转转|随便走走/.test(text), action: { type: 'go_to', target: 'furnace_plaza', reason: '去广场巡视' } },
+        { match: text => /待命|原地|别动|守在这/.test(text), action: { type: 'go_to', target: 'dorm_a_door', reason: '去宿舍原地待命' } },
+        { match: text => /巡视|逛逛|转转|随便走走/.test(text), action: { type: 'go_to', target: 'dorm_a_door', reason: '去宿舍巡视' } },
         { match: text => /工作|干活|忙起来|去干活/.test(text), action: { type: 'go_to', target: 'workshop_door', reason: '去工坊工作' } },
     ];
 
@@ -273,16 +273,15 @@
         COLLECT_FOOD: { mode: 'task_system', taskType: 'COLLECT_FOOD', resourceType: 'food', desc: '去冰湖采集食物', ...COMMANDER_TASK_DEFAULTS.COLLECT_FOOD },
         COLLECT_MATERIAL: { mode: 'task_system', taskType: 'COLLECT_MATERIAL', resourceType: null, desc: '去废墟探索物资', ...COMMANDER_TASK_DEFAULTS.COLLECT_MATERIAL },
         BOOST_MORALE: { mode: 'task_system', taskType: 'BOOST_MORALE', resourceType: null, desc: '去安抚和鼓舞大家，恢复士气', ...COMMANDER_TASK_DEFAULTS.BOOST_MORALE },
-        MAINTAIN_ORDER: { mode: 'task_system', taskType: 'MAINTAIN_ORDER', resourceType: null, desc: '去暖炉广场巡逻警戒', ...COMMANDER_TASK_DEFAULTS.MAINTAIN_ORDER },
+        MAINTAIN_ORDER: { mode: 'task_system', taskType: 'MAINTAIN_ORDER', resourceType: null, desc: '去宿舍巡逻警戒', ...COMMANDER_TASK_DEFAULTS.MAINTAIN_ORDER },
         MINE_POWER: { mode: 'task_system', taskType: 'MINE_POWER', targetLocation: 'ore_pile', stateDesc: '采矿', reason: '去矿渣堆采矿', targetValue: 20, priority: 'high', resourceType: 'power', desc: '去矿渣堆采矿发电' },
-        // MAINTAIN_FURNACE已移除（v4.13: 暖炉是被动系统，不需要人维护）
         PSYCHOLOGY: { mode: 'task_system', taskType: 'PSYCHOLOGY', targetLocation: 'medical_door', stateDesc: '心理疏导', reason: '去医疗站心理疏导', targetValue: 1, priority: 'high', resourceType: null, desc: '去医疗站做心理疏导' },
         WAREHOUSE: { mode: 'task_system', taskType: 'WAREHOUSE', targetLocation: 'warehouse_door', stateDesc: '盘点物资', reason: '去仓库盘点物资', targetValue: 1, priority: 'high', resourceType: null, desc: '去仓库盘点物资，减少浪费' },
         REST: { type: 'rest', reason: '回宿舍休息', priority: 'urgent', desc: '回宿舍休息恢复体力' },
         EAT: { type: 'eat', target: 'kitchen_door', reason: '去吃饭', priority: 'urgent', desc: '去炊事房吃饭' },
         WORK: { type: 'go_to', target: 'workshop_door', reason: '去工坊工作', priority: 'normal', desc: '去工坊工作' },
-        STAY: { type: 'go_to', target: 'furnace_plaza', reason: '去广场待命', priority: 'normal', desc: '去暖炉广场待命' },
-        WANDER: { type: 'go_to', target: 'furnace_plaza', reason: '去广场巡视', priority: 'low', desc: '去暖炉广场巡视' },
+        STAY: { type: 'go_to', target: 'dorm_a_door', reason: '去宿舍待命', priority: 'normal', desc: '去宿舍待命' },
+        WANDER: { type: 'go_to', target: 'dorm_a_door', reason: '去宿舍巡视', priority: 'low', desc: '去宿舍巡视' },
     };
 
     proto._nearestNPCToCamera = function(maxDist) {
